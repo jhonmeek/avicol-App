@@ -1,0 +1,184 @@
+# database.py
+import sqlite3
+
+from app_paths import database_path
+
+class Database:
+    def __init__(self, db_name=None):
+        self.db_name = str(db_name or database_path())
+        self.conn = sqlite3.connect(self.db_name)
+        self.create_tables()
+    
+    def create_tables(self):
+        cursor = self.conn.cursor()
+        
+        # Table pour les bandes de poulets
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS bandes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom_bande TEXT NOT NULL,
+                date_debut DATE NOT NULL,
+                nombre_initial INTEGER NOT NULL,
+                prix_achat_poussin REAL,
+                statut TEXT DEFAULT 'en_cours'
+            )
+        ''')
+        
+        # Table pour les mortalités
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mortalites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER,
+                date DATE NOT NULL,
+                nombre_morts INTEGER NOT NULL,
+                cause TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        
+        # Table pour les dépenses
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS depenses (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER,
+                date DATE NOT NULL,
+                type_depense TEXT NOT NULL,
+                description TEXT,
+                montant REAL NOT NULL,
+                fournisseur TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        
+        # Table pour les ventes/recettes
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS ventes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER,
+                date DATE NOT NULL,
+                nombre_poulets INTEGER NOT NULL,
+                prix_unitaire REAL NOT NULL,
+                montant_total REAL NOT NULL,
+                client TEXT,
+                paiement TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+
+        self._ensure_column("ventes", "client", "TEXT")
+        self._ensure_column("ventes", "paiement", "TEXT")
+        self.conn.commit()
+
+    def _ensure_column(self, table, column, definition):
+        cursor = self.conn.cursor()
+        columns = {
+            row[1] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    
+    def ajouter_bande(self, nom_bande, date_debut, nombre_initial, prix_achat=None):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO bandes (nom_bande, date_debut, nombre_initial, prix_achat_poussin)
+            VALUES (?, ?, ?, ?)
+        ''', (nom_bande, date_debut, nombre_initial, prix_achat))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def modifier_bande(
+        self, bande_id, nom_bande, date_debut, nombre_initial, prix_achat=None
+    ):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            UPDATE bandes
+            SET nom_bande = ?, date_debut = ?, nombre_initial = ?,
+                prix_achat_poussin = ?
+            WHERE id = ?
+            ''',
+            (nom_bande, date_debut, nombre_initial, prix_achat, bande_id),
+        )
+        self.conn.commit()
+    
+    def ajouter_mortalite(self, bande_id, date, nombre_morts, cause=None):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO mortalites (bande_id, date, nombre_morts, cause)
+            VALUES (?, ?, ?, ?)
+        ''', (bande_id, date, nombre_morts, cause))
+        self.conn.commit()
+    
+    def ajouter_depense(self, bande_id, date, type_depense, montant, description=None, fournisseur=None):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO depenses (bande_id, date, type_depense, montant, description, fournisseur)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (bande_id, date, type_depense, montant, description, fournisseur))
+        self.conn.commit()
+    
+    def ajouter_vente(
+        self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
+        paiement=None
+    ):
+        montant_total = nombre_poulets * prix_unitaire
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO ventes (
+                bande_id, date, nombre_poulets, prix_unitaire, montant_total,
+                client, paiement
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            bande_id, date, nombre_poulets, prix_unitaire, montant_total,
+            client, paiement
+        ))
+        self.conn.commit()
+    
+    def get_bande_info(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM bandes WHERE id = ?', (bande_id,))
+        return cursor.fetchone()
+    
+    def get_total_mortalites(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT SUM(nombre_morts) FROM mortalites WHERE bande_id = ?', (bande_id,))
+        result = cursor.fetchone()[0]
+        return result if result else 0
+    
+    def get_total_depenses(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT SUM(montant) FROM depenses WHERE bande_id = ?', (bande_id,))
+        result = cursor.fetchone()[0]
+        return result if result else 0
+    
+    def get_total_ventes(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT SUM(montant_total) FROM ventes WHERE bande_id = ?', (bande_id,))
+        result = cursor.fetchone()[0]
+        return result if result else 0
+    
+    def get_poulets_restants(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT nombre_initial FROM bandes WHERE id = ?', (bande_id,))
+        row = cursor.fetchone()
+        if not row:
+            return 0
+        initial = row[0]
+        total_morts = self.get_total_mortalites(bande_id)
+        total_vendus = self.get_total_vendus(bande_id)
+        return initial - total_morts - total_vendus
+    
+    def get_total_vendus(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT SUM(nombre_poulets) FROM ventes WHERE bande_id = ?', (bande_id,))
+        result = cursor.fetchone()[0]
+        return result if result else 0
+    
+    def get_bandes(self):
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM bandes ORDER BY date_debut DESC')
+        return cursor.fetchall()
+    
+    def close(self):
+        self.conn.close()

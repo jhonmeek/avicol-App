@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+backups/
+exports/
+logs/
+rapports/
+temp/
+
+# Packaging outputs
+build/
+dist/
+installer/
+*.rar
+*.zip
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
