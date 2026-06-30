@@ -24,7 +24,7 @@ installer/
 
 # Editors and operating systems
 .idea/
+.claude/
 .vscode/
 .DS_Store
 Thumbs.db
-
