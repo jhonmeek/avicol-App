@@ -680,5 +680,39 @@ class Database:
             if self.get_stock_quantite(article[0]) < article[4]
         ]
 
+    def ajouter_sortie_stock_aliment(
+        self, stock_id, bande_id, date, quantite_kg, type_aliment=None,
+        observation=None
+    ):
+        """EF-6.4 : une sortie de stock d'aliment credite aussi
+        consommations_aliment, pour eviter la double saisie entre le module
+        Stocks et le suivi zootechnique (IC, Phase 2)."""
+        if quantite_kg <= 0:
+            raise ValueError("La quantité d'aliment doit être supérieure à zéro.")
+        stock_actuel = self.get_stock_quantite(stock_id)
+        if quantite_kg > stock_actuel:
+            raise ValueError(
+                f"Sortie refusée : {quantite_kg:g} kg demandés pour "
+                f"{stock_actuel:g} kg en stock."
+            )
+        cursor = self.conn.cursor()
+        motif = (
+            f"Consommation aliment - {observation}"
+            if observation else "Consommation aliment"
+        )
+        cursor.execute('''
+            INSERT INTO mouvements_stock (
+                stock_id, date, type_mouvement, quantite, bande_id, motif
+            )
+            VALUES (?, ?, 'sortie', ?, ?, ?)
+        ''', (stock_id, date, quantite_kg, bande_id, motif))
+        cursor.execute('''
+            INSERT INTO consommations_aliment (
+                bande_id, date, quantite_kg, type_aliment, observation
+            )
+            VALUES (?, ?, ?, ?, ?)
+        ''', (bande_id, date, quantite_kg, type_aliment, observation))
+        self.conn.commit()
+
     def close(self):
         self.conn.close()

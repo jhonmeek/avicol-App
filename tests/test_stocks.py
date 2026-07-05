@@ -84,3 +84,30 @@ def test_get_articles_sous_seuil(tmp_path):
     ids_alertes = [a[0] for a in alertes]
     assert stock_bas in ids_alertes
     assert stock_ok not in ids_alertes
+
+
+def test_sortie_stock_aliment_credite_consommation(tmp_path):
+    db = Database(db_name=tmp_path / "liaison.db")
+    bande_id = db.ajouter_bande("Lot chair", "2026-01-01", 1000, 500)
+    stock_id = db.ajouter_article_stock("Aliment croissance", "aliment", "kg")
+    db.ajouter_mouvement_stock(stock_id, "2026-02-01", "entree", 300)
+
+    db.ajouter_sortie_stock_aliment(
+        stock_id, bande_id, "2026-02-10", 120, "Croissance", "Semaine 3"
+    )
+
+    stock_restant = db.get_stock_quantite(stock_id)
+    total_aliment_bande = db.get_total_aliment_kg(bande_id)
+    db.close()
+    assert stock_restant == 180
+    assert total_aliment_bande == 120  # alimente EF-1.5 / l'IC de la Phase 2
+
+
+def test_sortie_stock_aliment_refusee_si_stock_insuffisant(tmp_path):
+    db = Database(db_name=tmp_path / "liaison2.db")
+    bande_id = db.ajouter_bande("Lot chair", "2026-01-01", 1000, 500)
+    stock_id = db.ajouter_article_stock("Aliment croissance", "aliment", "kg")
+    db.ajouter_mouvement_stock(stock_id, "2026-02-01", "entree", 50)
+    with pytest.raises(ValueError):
+        db.ajouter_sortie_stock_aliment(stock_id, bande_id, "2026-02-10", 120)
+    db.close()
