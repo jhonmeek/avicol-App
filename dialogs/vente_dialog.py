@@ -50,6 +50,12 @@ class NouvelleVenteDialog(QDialog):
         self.nombre_input.setValue(min(10, max(1, self.poulets_disponibles)))
         self.nombre_input.setSuffix(" sujets")
         form.addRow("Quantité vendue", self.nombre_input)
+        self.poids_total_input = QDoubleSpinBox()
+        self.poids_total_input.setRange(0, 1000000)
+        self.poids_total_input.setDecimals(1)
+        self.poids_total_input.setSuffix(" kg")
+        self.poids_total_input.setSpecialValueText("Non renseigné")
+        form.addRow("Poids total vendu (optionnel)", self.poids_total_input)
         self.prix_input = QDoubleSpinBox()
         self.prix_input.setRange(0, 10000000)
         self.prix_input.setDecimals(0)
@@ -111,10 +117,12 @@ class NouvelleVenteDialog(QDialog):
         self.accept()
 
     def get_data(self):
+        poids_total = self.poids_total_input.value()
         return {
             "date": self.date_input.date().toString("yyyy-MM-dd"),
             "nombre": self.nombre_input.value(),
             "prix": self.prix_input.value(),
             "client": self.client_input.text().strip(),
             "paiement": self.paiement_combo.currentText(),
+            "poids_total": poids_total if poids_total > 0 else None,
         }

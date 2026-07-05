@@ -1974,7 +1974,11 @@ class ProfessionalMainWindow(QMainWindow):
         latest_pesee = self.db.get_latest_pesee(bande_id)
         first_pesee = self.db.get_first_pesee(bande_id)
         poids_moyen_g = latest_pesee[3] if latest_pesee else 0
-        poids_vif_kg = indicators.poids_vif_estime_kg(restants, poids_moyen_g)
+        poids_vif_restant_kg = indicators.poids_vif_estime_kg(restants, poids_moyen_g)
+        poids_vendu_kg = self.db.get_total_poids_vendu(bande_id) or 0
+        poids_vif_kg = indicators.poids_vif_produit_kg(
+            poids_vif_restant_kg, poids_vendu_kg
+        )
         ic = indicators.indice_consommation(total_aliment_kg, poids_vif_kg)
         gmq = 0.0
         if latest_pesee:
@@ -2962,6 +2966,7 @@ class ProfessionalMainWindow(QMainWindow):
                     data['prix'],
                     data['client'],
                     data['paiement'],
+                    poids_total=data.get('poids_total'),
                 )
             except ValueError as erreur:
                 self.show_message(
