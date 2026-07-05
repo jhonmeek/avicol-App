@@ -1496,12 +1496,51 @@ class ProfessionalMainWindow(QMainWindow):
         ])
         oeufs_layout.addWidget(self.ventes_oeufs_table)
 
+        # Onglet Stocks
+        stocks_tab = QWidget()
+        stocks_layout = QVBoxLayout(stocks_tab)
+        stocks_layout.setContentsMargins(10, 10, 10, 10)
+
+        stocks_header = QHBoxLayout()
+        stocks_header.addWidget(QLabel("Gestion des stocks"))
+        stocks_header.addStretch()
+
+        add_article_btn = QPushButton("Nouvel article")
+        add_article_btn.setStyleSheet(self.theme_manager.get_button_style("secondary", "small"))
+        add_article_btn.clicked.connect(self.nouvel_article_stock)
+        stocks_header.addWidget(add_article_btn)
+
+        add_entree_stock_btn = QPushButton("Entrée de stock")
+        add_entree_stock_btn.setStyleSheet(self.theme_manager.get_button_style("primary", "small"))
+        add_entree_stock_btn.clicked.connect(self.ajouter_entree_stock)
+        stocks_header.addWidget(add_entree_stock_btn)
+
+        add_sortie_stock_btn = QPushButton("Sortie de stock")
+        add_sortie_stock_btn.setStyleSheet(self.theme_manager.get_button_style("secondary", "small"))
+        add_sortie_stock_btn.clicked.connect(self.ajouter_sortie_stock)
+        stocks_header.addWidget(add_sortie_stock_btn)
+
+        stocks_layout.addLayout(stocks_header)
+
+        self.stocks_table = QTableWidget()
+        self.stocks_table.setColumnCount(6)
+        self.stocks_table.setHorizontalHeaderLabels([
+            "Article",
+            "Catégorie",
+            "Unité",
+            "Stock actuel",
+            "Seuil d'alerte",
+            "Statut",
+        ])
+        stocks_layout.addWidget(self.stocks_table)
+
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
         self.trans_tabs.addTab(aliment_tab, "Aliment")
         self.trans_tabs.addTab(pesees_tab, "Pesées")
         self.trans_tabs.addTab(oeufs_tab, "Œufs")
+        self.trans_tabs.addTab(stocks_tab, "Stocks")
         
         layout.addWidget(self.trans_tabs)
         
@@ -2551,6 +2590,31 @@ class ProfessionalMainWindow(QMainWindow):
                     "Sélectionnez une bande pour voir le stock d'œufs et le taux de ponte."
                 )
 
+        if hasattr(self, "stocks_table"):
+            articles = self.db.get_articles_stock()
+            self.stocks_table.setRowCount(len(articles))
+            libelles_categorie = {
+                "aliment": "Aliment",
+                "medicament": "Médicament / vaccin",
+                "litiere": "Litière",
+            }
+            for row_index, article in enumerate(articles):
+                article_id, nom_article, categorie, unite, seuil = article
+                quantite = self.db.get_stock_quantite(article_id) or 0
+                statut = "En alerte" if quantite < seuil else "OK"
+                values = [
+                    nom_article,
+                    libelles_categorie.get(categorie, categorie),
+                    unite,
+                    f"{quantite:,.1f}",
+                    f"{seuil:,.1f}",
+                    statut,
+                ]
+                for column, value in enumerate(values):
+                    self.stocks_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
         self.filter_transactions()
 
     def filter_transactions(self):
@@ -3148,6 +3212,88 @@ class ProfessionalMainWindow(QMainWindow):
                 "Vente enregistrée",
                 "La vente d'œufs a été ajoutée au journal.",
             )
+
+    def nouvel_article_stock(self):
+        from dialogs import SaisieArticleStockDialog
+
+        dialog = SaisieArticleStockDialog(self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_article_stock(
+                    data["nom_article"],
+                    data["categorie"],
+                    data["unite"],
+                    data["seuil_alerte"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Article créé",
+                "Le nouvel article de stock a été ajouté.",
+            )
+
+    def _ouvrir_mouvement_stock(self, type_mouvement):
+        articles = self.db.get_articles_stock()
+        if not articles:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Aucun article",
+                "Créez d'abord un article de stock.",
+            )
+            return
+
+        from dialogs import MouvementStockDialog
+
+        dialog = MouvementStockDialog(
+            type_mouvement, articles, self.current_bande_id, self
+        )
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                if type_mouvement == "sortie" and data["lier_consommation"]:
+                    self.db.ajouter_sortie_stock_aliment(
+                        data["article_id"],
+                        self.current_bande_id,
+                        data["date"],
+                        data["quantite"],
+                        observation=data["motif"],
+                    )
+                else:
+                    self.db.ajouter_mouvement_stock(
+                        data["article_id"],
+                        data["date"],
+                        type_mouvement,
+                        data["quantite"],
+                        motif=data["motif"],
+                    )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Mouvement refusé",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Mouvement enregistré",
+                "Le mouvement de stock a été enregistré.",
+            )
+
+    def ajouter_entree_stock(self):
+        self._ouvrir_mouvement_stock("entree")
+
+    def ajouter_sortie_stock(self):
+        self._ouvrir_mouvement_stock("sortie")
 
     def ajouter_vente(self):
         if not self.current_bande_id:
