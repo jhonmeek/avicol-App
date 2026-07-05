@@ -1441,12 +1441,67 @@ class ProfessionalMainWindow(QMainWindow):
             "Actions",
         ])
         pesees_layout.addWidget(self.pesees_table)
-        
+
+        # Onglet Œufs
+        oeufs_tab = QWidget()
+        oeufs_layout = QVBoxLayout(oeufs_tab)
+        oeufs_layout.setContentsMargins(10, 10, 10, 10)
+
+        oeufs_header = QHBoxLayout()
+        oeufs_header.addWidget(QLabel("Production d'œufs"))
+        oeufs_header.addStretch()
+
+        add_ponte_btn = QPushButton("Ajouter une ponte")
+        add_ponte_btn.setStyleSheet(self.theme_manager.get_button_style("primary", "small"))
+        add_ponte_btn.clicked.connect(self.ajouter_ponte)
+        oeufs_header.addWidget(add_ponte_btn)
+
+        add_vente_oeufs_btn = QPushButton("Vendre des œufs")
+        add_vente_oeufs_btn.setStyleSheet(self.theme_manager.get_button_style("secondary", "small"))
+        add_vente_oeufs_btn.clicked.connect(self.ajouter_vente_oeufs)
+        oeufs_header.addWidget(add_vente_oeufs_btn)
+
+        oeufs_layout.addLayout(oeufs_header)
+
+        self.oeufs_summary_label = QLabel(
+            "Sélectionnez une bande pour voir le stock d'œufs et le taux de ponte."
+        )
+        self.oeufs_summary_label.setObjectName("summary")
+        oeufs_layout.addWidget(self.oeufs_summary_label)
+
+        self.ponte_table = QTableWidget()
+        self.ponte_table.setColumnCount(6)
+        self.ponte_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Œufs",
+            "Taux du jour",
+            "Observation",
+            "Actions",
+        ])
+        oeufs_layout.addWidget(self.ponte_table)
+
+        ventes_oeufs_label = QLabel("Ventes d'œufs")
+        oeufs_layout.addWidget(ventes_oeufs_label)
+
+        self.ventes_oeufs_table = QTableWidget()
+        self.ventes_oeufs_table.setColumnCount(6)
+        self.ventes_oeufs_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Quantité",
+            "Prix unitaire",
+            "Total",
+            "Client",
+        ])
+        oeufs_layout.addWidget(self.ventes_oeufs_table)
+
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
         self.trans_tabs.addTab(aliment_tab, "Aliment")
         self.trans_tabs.addTab(pesees_tab, "Pesées")
+        self.trans_tabs.addTab(oeufs_tab, "Œufs")
         
         layout.addWidget(self.trans_tabs)
         
@@ -2427,6 +2482,75 @@ class ProfessionalMainWindow(QMainWindow):
                     self.pesees_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+
+        if hasattr(self, "ponte_table"):
+            rows = cursor.execute(
+                """
+                SELECT p.date, b.nom_bande, p.nombre_oeufs, p.observation, p.bande_id
+                FROM pontes p
+                LEFT JOIN bandes b ON b.id = p.bande_id
+                ORDER BY p.date DESC, p.id DESC
+                """
+            ).fetchall()
+            self.ponte_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                poules_presentes = self.db.get_poulets_restants(row[4]) or 0
+                taux_jour = indicators.taux_ponte(row[2], poules_presentes)
+                values = [
+                    row[0],
+                    row[1] or "",
+                    row[2],
+                    f"{taux_jour:.1f} %" if poules_presentes else "N/A",
+                    row[3] or "",
+                    "",
+                ]
+                for column, value in enumerate(values):
+                    self.ponte_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
+        if hasattr(self, "ventes_oeufs_table"):
+            rows = cursor.execute(
+                """
+                SELECT m.date, b.nom_bande, m.quantite, m.prix_unitaire,
+                       m.montant, m.client
+                FROM mouvements_oeufs m
+                LEFT JOIN bandes b ON b.id = m.bande_id
+                WHERE m.type_mouvement = 'vente'
+                ORDER BY m.date DESC, m.id DESC
+                """
+            ).fetchall()
+            self.ventes_oeufs_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[0],
+                    row[1] or "",
+                    row[2],
+                    f"{row[3]:,.0f} FCFA",
+                    f"{row[4]:,.0f} FCFA",
+                    row[5] or "",
+                ]
+                for column, value in enumerate(values):
+                    self.ventes_oeufs_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
+        if hasattr(self, "oeufs_summary_label"):
+            if self.current_bande_id:
+                stock = self.db.get_stock_oeufs(self.current_bande_id) or 0
+                total_oeufs = self.db.get_total_oeufs(self.current_bande_id) or 0
+                jours = self.db.get_nombre_jours_ponte(self.current_bande_id) or 0
+                poules = self.db.get_poulets_restants(self.current_bande_id) or 0
+                taux_moyen = indicators.taux_ponte_moyen(total_oeufs, poules, jours)
+                self.oeufs_summary_label.setText(
+                    f"Bande active — Stock d'œufs : {stock:,} | "
+                    f"Taux de ponte moyen : {taux_moyen:.1f} %"
+                )
+            else:
+                self.oeufs_summary_label.setText(
+                    "Sélectionnez une bande pour voir le stock d'œufs et le taux de ponte."
+                )
+
         self.filter_transactions()
 
     def filter_transactions(self):
@@ -2939,6 +3063,90 @@ class ProfessionalMainWindow(QMainWindow):
                 QMessageBox.Icon.Information,
                 "Pesée enregistrée",
                 "La pesée a été ajoutée au suivi de croissance.",
+            )
+
+    def ajouter_ponte(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        poules_presentes = self.db.get_poulets_restants(self.current_bande_id) or 0
+
+        from dialogs import SaisiePonteDialog
+
+        dialog = SaisiePonteDialog(self.current_bande_id, poules_presentes, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_ponte(
+                    self.current_bande_id,
+                    data["date"],
+                    data["nombre_oeufs"],
+                    data["observation"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Ponte enregistrée",
+                "La production d'œufs a été ajoutée au suivi.",
+            )
+
+    def ajouter_vente_oeufs(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        stock = self.db.get_stock_oeufs(self.current_bande_id) or 0
+        if stock <= 0:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Vente impossible",
+                "Aucun œuf n'est disponible à la vente.",
+            )
+            return
+
+        from dialogs import NouvelleVenteOeufsDialog
+
+        dialog = NouvelleVenteOeufsDialog(stock, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_vente_oeufs(
+                    self.current_bande_id,
+                    data["date"],
+                    data["quantite"],
+                    data["prix"],
+                    data["client"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Vente impossible",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Vente enregistrée",
+                "La vente d'œufs a été ajoutée au journal.",
             )
 
     def ajouter_vente(self):
