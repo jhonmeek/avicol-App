@@ -11,6 +11,8 @@ from pathlib import Path
 import csv
 import shutil
 
+import backup as backup_module
+from app_paths import ensure_user_directories
 from database import Database
 from theme_avicole import AvicoleThemeManager
 from dialogs.styles import DIALOG_QSS
@@ -2415,20 +2417,13 @@ class ProfessionalMainWindow(QMainWindow):
         )
 
     def backup_database(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Sauvegarder la base",
-            f"avicole_backup_{datetime.now():%Y%m%d_%H%M}.sqlite",
-            "Base SQLite (*.sqlite)",
-        )
-        if not path:
-            return
         self.db.conn.commit()
-        shutil.copy2(Path(self.db.db_name), path)
+        backups_dir = ensure_user_directories()["backups"]
+        dest = backup_module.create_backup(self.db.db_name, backups_dir)
         self.show_message(
             QMessageBox.Icon.Information,
             "Sauvegarde terminée",
-            f"La base a été sauvegardée :\n{path}",
+            f"La base a été sauvegardée :\n{dest}",
         )
 
     def restore_database(self):
@@ -2445,15 +2440,16 @@ class ProfessionalMainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
         target = Path(self.db.db_name)
+        backups_dir = ensure_user_directories()["backups"]
         self.db.close()
-        shutil.copy2(path, target)
+        safety = backup_module.restore_backup(path, target, backups_dir)
         self.db = Database(str(target))
         self.current_bande_id = None
         self.load_bandes()
         self.show_message(
             QMessageBox.Icon.Information,
             "Restauration terminée",
-            "La base de données a été restaurée.",
+            f"La base a été restaurée.\nSauvegarde de sécurité :\n{safety}",
         )
 
     def save_settings(self):
