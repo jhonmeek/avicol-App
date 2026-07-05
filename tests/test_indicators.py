@@ -58,3 +58,17 @@ def test_ic_fin_de_cycle_ne_s_effondre_pas_a_zero():
     ic = indicators.indice_consommation(3240, poids_produit)
     assert poids_vif_restant == 0.0
     assert ic == pytest.approx(1.8)
+
+
+def test_taux_ponte_jour():
+    assert indicators.taux_ponte(180, 200) == pytest.approx(90.0)
+
+
+def test_taux_ponte_moyen_sur_periode():
+    assert indicators.taux_ponte_moyen(1800, 200, 10) == pytest.approx(90.0)
+
+
+def test_bornes_taux_ponte():
+    assert indicators.taux_ponte(50, 0) == 0.0
+    assert indicators.taux_ponte_moyen(100, 0, 5) == 0.0
+    assert indicators.taux_ponte_moyen(100, 50, 0) == 0.0

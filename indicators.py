@@ -63,3 +63,15 @@ def gain_moyen_quotidien(poids_initial_g, poids_final_g, jours):
     if jours <= 0 or poids_final_g <= poids_initial_g:
         return 0.0
     return (poids_final_g - poids_initial_g) / jours
+
+
+def taux_ponte(nombre_oeufs, poules_presentes):
+    """Taux de ponte quotidien = oeufs pondus / poules presentes (%)."""
+    return (nombre_oeufs / poules_presentes * 100) if poules_presentes > 0 else 0.0
+
+
+def taux_ponte_moyen(total_oeufs, poules_presentes, nombre_jours):
+    """Taux de ponte moyen sur la periode = total oeufs / (poules x jours), en %."""
+    if poules_presentes <= 0 or nombre_jours <= 0:
+        return 0.0
+    return total_oeufs / (poules_presentes * nombre_jours) * 100
