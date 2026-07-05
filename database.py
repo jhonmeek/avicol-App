@@ -673,5 +673,12 @@ class Database:
         cursor.execute(query, params)
         return cursor.fetchall()
 
+    def get_articles_sous_seuil(self):
+        return [
+            article
+            for article in self.get_articles_stock()
+            if self.get_stock_quantite(article[0]) < article[4]
+        ]
+
     def close(self):
         self.conn.close()

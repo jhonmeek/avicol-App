@@ -66,3 +66,21 @@ def test_mouvement_stock_refuse_type_invalide(tmp_path):
     with pytest.raises(ValueError):
         db.ajouter_mouvement_stock(stock_id, "2026-04-01", "transfert", 10)
     db.close()
+
+
+def test_get_articles_sous_seuil(tmp_path):
+    db = Database(db_name=tmp_path / "seuil.db")
+    stock_bas = db.ajouter_article_stock(
+        "Aliment démarrage", "aliment", "kg", seuil_alerte=100
+    )
+    stock_ok = db.ajouter_article_stock(
+        "Vaccin Newcastle", "medicament", "dose", seuil_alerte=10
+    )
+    db.ajouter_mouvement_stock(stock_bas, "2026-04-01", "entree", 50)  # sous le seuil
+    db.ajouter_mouvement_stock(stock_ok, "2026-04-01", "entree", 20)   # au-dessus
+
+    alertes = db.get_articles_sous_seuil()
+    db.close()
+    ids_alertes = [a[0] for a in alertes]
+    assert stock_bas in ids_alertes
+    assert stock_ok not in ids_alertes
