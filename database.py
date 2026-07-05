@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -50,6 +50,8 @@ class Database:
             self._migration_3_poids_vente()
         elif version == 4:
             self._migration_4_ponte_mvp()
+        elif version == 5:
+            self._migration_5_stocks()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -185,6 +187,41 @@ class Database:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_mouvements_oeufs_bande_date "
             "ON mouvements_oeufs (bande_id, date)"
+        )
+
+    def _migration_5_stocks(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS stocks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nom_article TEXT NOT NULL,
+                categorie TEXT NOT NULL
+                    CHECK (categorie IN ('aliment', 'medicament', 'litiere')),
+                unite TEXT NOT NULL,
+                seuil_alerte REAL NOT NULL DEFAULT 0
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mouvements_stock (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                stock_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                type_mouvement TEXT NOT NULL
+                    CHECK (type_mouvement IN ('entree', 'sortie')),
+                quantite REAL NOT NULL CHECK (quantite > 0),
+                bande_id INTEGER,
+                motif TEXT,
+                FOREIGN KEY (stock_id) REFERENCES stocks(id),
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        self._create_stock_indexes()
+
+    def _create_stock_indexes(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mouvements_stock_stock_date "
+            "ON mouvements_stock (stock_id, date)"
         )
 
     def _ensure_column(self, table, column, definition):
