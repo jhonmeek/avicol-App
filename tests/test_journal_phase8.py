@@ -11,9 +11,10 @@ def test_migration_v8_table_journal_actions(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
     }
+    schema_version = db.get_schema_version()
     db.close()
 
-    assert db.SCHEMA_VERSION == 8
+    assert schema_version == db.SCHEMA_VERSION
     assert "journal_actions" in tables
 
 

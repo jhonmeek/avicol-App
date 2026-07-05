@@ -7,6 +7,7 @@ from .aliment_dialog import SaisieAlimentDialog
 from .pesee_dialog import SaisiePeseeDialog
 from .ponte_dialog import SaisiePonteDialog
 from .vente_oeufs_dialog import NouvelleVenteOeufsDialog
+from .calibrage_oeufs_dialog import SaisieCalibrageOeufsDialog
 from .article_stock_dialog import SaisieArticleStockDialog
 from .mouvement_stock_dialog import MouvementStockDialog
 from .intervention_dialog import SaisieInterventionDialog
@@ -21,6 +22,7 @@ __all__ = [
     'SaisiePeseeDialog',
     'SaisiePonteDialog',
     'NouvelleVenteOeufsDialog',
+    'SaisieCalibrageOeufsDialog',
     'SaisieArticleStockDialog',
     'MouvementStockDialog',
     'SaisieInterventionDialog',

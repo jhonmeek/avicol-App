@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 8
+    SCHEMA_VERSION = 9
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -58,6 +58,8 @@ class Database:
             self._migration_7_previsions()
         elif version == 8:
             self._migration_8_journal_actions()
+        elif version == 9:
+            self._migration_9_calibrage_oeufs()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -306,6 +308,30 @@ class Database:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_journal_actions_entite "
             "ON journal_actions (entite, entite_id)"
+        )
+
+    def _migration_9_calibrage_oeufs(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS calibrages_oeufs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                categorie TEXT NOT NULL
+                    CHECK (categorie IN (
+                        'petit', 'moyen', 'gros', 'tres_gros', 'declasse'
+                    )),
+                quantite INTEGER NOT NULL CHECK (quantite > 0),
+                poids_moyen_g REAL CHECK (
+                    poids_moyen_g IS NULL OR poids_moyen_g > 0
+                ),
+                observation TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_calibrages_oeufs_bande_date "
+            "ON calibrages_oeufs (bande_id, date)"
         )
 
     def _ensure_column(self, table, column, definition):
@@ -593,6 +619,85 @@ class Database:
             query += ' WHERE bande_id = ?'
             params = (bande_id,)
         query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    CATEGORIES_CALIBRAGE_OEUFS = {
+        'petit', 'moyen', 'gros', 'tres_gros', 'declasse'
+    }
+
+    def ajouter_calibrage_oeufs(
+        self, bande_id, date, categorie, quantite, poids_moyen_g=None,
+        observation=None
+    ):
+        if categorie not in self.CATEGORIES_CALIBRAGE_OEUFS:
+            raise ValueError("Categorie de calibrage invalide.")
+        if quantite <= 0:
+            raise ValueError("La quantite calibree doit etre superieure a zero.")
+        if poids_moyen_g is not None and poids_moyen_g <= 0:
+            raise ValueError("Le poids moyen doit etre superieur a zero.")
+        deja_calibres = self.get_total_oeufs_calibres(bande_id)
+        total_produits = self.get_total_oeufs(bande_id)
+        if deja_calibres + quantite > total_produits:
+            raise ValueError(
+                "Calibrage refuse : la quantite calibree depasse la production."
+            )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO calibrages_oeufs (
+                bande_id, date, categorie, quantite, poids_moyen_g, observation
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            ''',
+            (bande_id, date, categorie, quantite, poids_moyen_g, observation),
+        )
+        self._log_action(
+            'calibrage_oeufs',
+            'calibrages_oeufs',
+            cursor.lastrowid,
+            f"{quantite} oeufs calibres - {categorie}",
+            cursor,
+        )
+        self.conn.commit()
+
+    def get_calibrages_oeufs(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, categorie, quantite, poids_moyen_g,
+                   observation
+            FROM calibrages_oeufs
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_total_oeufs_calibres(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = 'SELECT SUM(quantite) FROM calibrages_oeufs'
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        cursor.execute(query, params)
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def get_calibrage_oeufs_par_categorie(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT categorie, SUM(quantite)
+            FROM calibrages_oeufs
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' GROUP BY categorie ORDER BY categorie'
         cursor.execute(query, params)
         return cursor.fetchall()
 

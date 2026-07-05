@@ -1495,6 +1495,11 @@ class ProfessionalMainWindow(QMainWindow):
         add_vente_oeufs_btn.clicked.connect(self.ajouter_vente_oeufs)
         oeufs_header.addWidget(add_vente_oeufs_btn)
 
+        add_calibrage_btn = QPushButton("Calibrer")
+        add_calibrage_btn.setStyleSheet(self.theme_manager.get_button_style("secondary", "small"))
+        add_calibrage_btn.clicked.connect(self.ajouter_calibrage_oeufs)
+        oeufs_header.addWidget(add_calibrage_btn)
+
         oeufs_layout.addLayout(oeufs_header)
 
         self.oeufs_summary_label = QLabel(
@@ -1529,6 +1534,21 @@ class ProfessionalMainWindow(QMainWindow):
             "Client",
         ])
         oeufs_layout.addWidget(self.ventes_oeufs_table)
+
+        calibrage_label = QLabel("Calibrage des œufs")
+        oeufs_layout.addWidget(calibrage_label)
+
+        self.calibrage_oeufs_table = QTableWidget()
+        self.calibrage_oeufs_table.setColumnCount(6)
+        self.calibrage_oeufs_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Catégorie",
+            "Quantité",
+            "Poids moyen",
+            "Observation",
+        ])
+        oeufs_layout.addWidget(self.calibrage_oeufs_table)
 
         # Onglet Stocks
         stocks_tab = QWidget()
@@ -1781,6 +1801,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Fiche lot AGASA",
             "Prévisionnel vs réel",
             "Alertes opérationnelles",
+            "Calibrage œufs",
         ])
         self.report_type_combo = report_type
         options_layout.addWidget(QLabel("Type de rapport:"), 0, 0)
@@ -2720,15 +2741,44 @@ class ProfessionalMainWindow(QMainWindow):
                         row_index, column, QTableWidgetItem(str(value))
                     )
 
+        if hasattr(self, "calibrage_oeufs_table"):
+            rows = cursor.execute(
+                """
+                SELECT c.date, b.nom_bande, c.categorie, c.quantite,
+                       c.poids_moyen_g, c.observation
+                FROM calibrages_oeufs c
+                LEFT JOIN bandes b ON b.id = c.bande_id
+                ORDER BY c.date DESC, c.id DESC
+                """
+            ).fetchall()
+            self.calibrage_oeufs_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[0],
+                    row[1] or "",
+                    row[2],
+                    row[3],
+                    f"{row[4]:,.1f} g" if row[4] else "",
+                    row[5] or "",
+                ]
+                for column, value in enumerate(values):
+                    self.calibrage_oeufs_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
         if hasattr(self, "oeufs_summary_label"):
             if self.current_bande_id:
                 stock = self.db.get_stock_oeufs(self.current_bande_id) or 0
                 total_oeufs = self.db.get_total_oeufs(self.current_bande_id) or 0
+                oeufs_calibres = (
+                    self.db.get_total_oeufs_calibres(self.current_bande_id) or 0
+                )
                 jours = self.db.get_nombre_jours_ponte(self.current_bande_id) or 0
                 poules = self.db.get_poulets_restants(self.current_bande_id) or 0
                 taux_moyen = indicators.taux_ponte_moyen(total_oeufs, poules, jours)
                 self.oeufs_summary_label.setText(
                     f"Bande active — Stock d'œufs : {stock:,} | "
+                    f"Calibrés : {oeufs_calibres:,} | "
                     f"Taux de ponte moyen : {taux_moyen:.1f} %"
                 )
             else:
@@ -2842,6 +2892,7 @@ class ProfessionalMainWindow(QMainWindow):
             (self.ventes_table, 1),
             (self.aliment_table, 1),
             (self.pesees_table, 1),
+            (self.calibrage_oeufs_table, 1),
             (self.interventions_table, 1),
             (self.journal_table, None),
         )
@@ -2995,6 +3046,13 @@ class ProfessionalMainWindow(QMainWindow):
                 alerts.alertes_text(self.db.get_alertes_operationnelles())
             )
             return
+        if report_type == "Calibrage œufs":
+            self.report_preview.setPlainText(
+                reporting.calibrage_oeufs_text(
+                    reporting.build_calibrage_oeufs(self.db)
+                )
+            )
+            return
         if report_type == "Fiche lot AGASA":
             if not self.current_bande_id:
                 self.show_message(
@@ -3085,6 +3143,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Fiche lot AGASA",
             "Prévisionnel vs réel",
             "Alertes opérationnelles",
+            "Calibrage œufs",
         ):
             if report_type == "Synthèse direction":
                 rows = reporting.synthese_direction_csv_rows(
@@ -3097,6 +3156,10 @@ class ProfessionalMainWindow(QMainWindow):
             elif report_type == "Alertes opérationnelles":
                 rows = alerts.alertes_csv_rows(
                     self.db.get_alertes_operationnelles()
+                )
+            elif report_type == "Calibrage œufs":
+                rows = reporting.calibrage_oeufs_csv_rows(
+                    reporting.build_calibrage_oeufs(self.db)
                 )
             else:
                 rows = reporting.fiche_lot_agasa_csv_rows(
@@ -3581,6 +3644,55 @@ class ProfessionalMainWindow(QMainWindow):
                 QMessageBox.Icon.Information,
                 "Vente enregistrée",
                 "La vente d'œufs a été ajoutée au journal.",
+            )
+
+    def ajouter_calibrage_oeufs(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        total_oeufs = self.db.get_total_oeufs(self.current_bande_id) or 0
+        deja_calibres = self.db.get_total_oeufs_calibres(self.current_bande_id) or 0
+        disponible = total_oeufs - deja_calibres
+        if disponible <= 0:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Calibrage impossible",
+                "Aucun œuf produit ne reste à calibrer pour cette bande.",
+            )
+            return
+
+        from dialogs import SaisieCalibrageOeufsDialog
+
+        dialog = SaisieCalibrageOeufsDialog(disponible, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_calibrage_oeufs(
+                    self.current_bande_id,
+                    data["date"],
+                    data["categorie"],
+                    data["quantite"],
+                    data["poids_moyen_g"],
+                    data["observation"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Calibrage refusé",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Calibrage enregistré",
+                "Le calibrage des œufs a été ajouté au suivi.",
             )
 
     def nouvel_article_stock(self):

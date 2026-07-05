@@ -110,6 +110,7 @@ def _lot_metrics(db, bande):
     oeufs_produits = db.get_total_oeufs(bande_id) or 0
     jours_ponte = db.get_nombre_jours_ponte(bande_id) or 0
     stock_oeufs = db.get_stock_oeufs(bande_id) or 0
+    oeufs_calibres = db.get_total_oeufs_calibres(bande_id) or 0
     taux_ponte = indicators.taux_ponte_moyen(
         oeufs_produits, restants, jours_ponte
     )
@@ -133,6 +134,7 @@ def _lot_metrics(db, bande):
         "gmq": zootech["gmq"],
         "oeufs_produits": oeufs_produits,
         "stock_oeufs": stock_oeufs,
+        "oeufs_calibres": oeufs_calibres,
         "ventes_oeufs": recettes_oeufs,
         "jours_ponte": jours_ponte,
         "taux_ponte": taux_ponte,
@@ -432,6 +434,21 @@ def _chronologie(db, bande_id):
             )
         )
 
+    for row in db.get_calibrages_oeufs(bande_id):
+        poids = f" - poids moyen {_csv_number(row[5])} g" if row[5] else ""
+        observation = f" - {row[6]}" if row[6] else ""
+        events.append(
+            _event(
+                row[2],
+                "Calibrage oeufs",
+                f"{row[4]} oeufs categorie {row[3]}{poids}{observation}",
+                row[4],
+                "",
+                f"calibrage#{row[0]}",
+                85,
+            )
+        )
+
     for row in db.get_interventions_sanitaires(bande_id):
         dose = f", dose {row[5]}" if row[5] else ""
         intervenant = f", {row[6]}" if row[6] else ""
@@ -510,6 +527,7 @@ def fiche_lot_agasa_text(fiche):
         f"IC : {kpis['ic']:.2f}",
         f"GMQ : {kpis['gmq']:.2f} g/j",
         f"Oeufs produits : {kpis['oeufs_produits']:,}",
+        f"Oeufs calibres : {kpis['oeufs_calibres']:,}",
         f"Stock oeufs : {kpis['stock_oeufs']:,}",
         "",
         "JOURNAL CHRONOLOGIQUE",
@@ -523,6 +541,78 @@ def fiche_lot_agasa_text(fiche):
         lines.append(
             f"{event['date']} | {event['type']} | {event['detail']}"
             f"{quantity}{amount}"
+        )
+    return "\n".join(lines)
+
+
+def build_calibrage_oeufs(db, bande_id=None):
+    bandes = {bande[0]: _bande_dict(bande) for bande in db.get_bandes()}
+    rows = []
+    totaux = {}
+    for row in db.get_calibrages_oeufs(bande_id):
+        bande = bandes.get(row[1], {"nom": f"Lot #{row[1]}", "id": row[1]})
+        item = {
+            "id": row[0],
+            "bande_id": row[1],
+            "bande_nom": bande["nom"],
+            "date": row[2],
+            "categorie": row[3],
+            "quantite": row[4],
+            "poids_moyen_g": row[5] or 0,
+            "observation": row[6] or "",
+        }
+        rows.append(item)
+        totaux[item["categorie"]] = totaux.get(item["categorie"], 0) + item["quantite"]
+    rows = sorted(
+        rows,
+        key=lambda item: (item["date"], item["bande_nom"], item["categorie"], item["id"]),
+    )
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "rows": rows,
+        "totaux": dict(sorted(totaux.items())),
+    }
+
+
+def calibrage_oeufs_csv_rows(rapport):
+    rows = [["Date", "Lot", "Categorie", "Quantite", "Poids moyen g", "Observation"]]
+    for item in rapport["rows"]:
+        rows.append([
+            item["date"],
+            item["bande_nom"],
+            item["categorie"],
+            str(item["quantite"]),
+            _csv_number(item["poids_moyen_g"]) if item["poids_moyen_g"] else "",
+            item["observation"],
+        ])
+    return rows
+
+
+def calibrage_oeufs_text(rapport):
+    lines = [
+        "AVICOLE PRO",
+        "CALIBRAGE OEUFS",
+        f"Edite le {datetime.now():%d/%m/%Y a %H:%M}",
+        "=" * 58,
+        "",
+        "REPARTITION PAR CATEGORIE",
+        "-" * 58,
+    ]
+    if not rapport["totaux"]:
+        lines.append("Aucun calibrage enregistre.")
+    for categorie, quantite in rapport["totaux"].items():
+        lines.append(f"{categorie} : {quantite:,} oeufs")
+
+    lines.extend(["", "DETAIL", "-" * 58])
+    for item in rapport["rows"]:
+        poids = (
+            f", poids moyen {_csv_number(item['poids_moyen_g'])} g"
+            if item["poids_moyen_g"] else ""
+        )
+        observation = f" - {item['observation']}" if item["observation"] else ""
+        lines.append(
+            f"{item['date']} | {item['bande_nom']} | {item['categorie']} | "
+            f"{item['quantite']} oeufs{poids}{observation}"
         )
     return "\n".join(lines)
 
