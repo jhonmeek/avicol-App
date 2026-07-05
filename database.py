@@ -7,6 +7,7 @@ class Database:
     def __init__(self, db_name=None):
         self.db_name = str(db_name or database_path())
         self.conn = sqlite3.connect(self.db_name)
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self.create_tables()
     
     def create_tables(self):
@@ -32,6 +33,7 @@ class Database:
                 date DATE NOT NULL,
                 nombre_morts INTEGER NOT NULL,
                 cause TEXT,
+                description TEXT,
                 FOREIGN KEY (bande_id) REFERENCES bandes(id)
             )
         ''')
@@ -65,8 +67,11 @@ class Database:
             )
         ''')
 
+        self._ensure_column("mortalites", "description", "TEXT")
+        self._ensure_column("depenses", "fournisseur", "TEXT")
         self._ensure_column("ventes", "client", "TEXT")
         self._ensure_column("ventes", "paiement", "TEXT")
+        self._create_indexes()
         self.conn.commit()
 
     def _ensure_column(self, table, column, definition):
@@ -76,6 +81,21 @@ class Database:
         }
         if column not in columns:
             cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    def _create_indexes(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mortalites_bande_date "
+            "ON mortalites (bande_id, date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_depenses_bande_date "
+            "ON depenses (bande_id, date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_ventes_bande_date "
+            "ON ventes (bande_id, date)"
+        )
     
     def ajouter_bande(self, nom_bande, date_debut, nombre_initial, prix_achat=None):
         cursor = self.conn.cursor()
@@ -101,12 +121,14 @@ class Database:
         )
         self.conn.commit()
     
-    def ajouter_mortalite(self, bande_id, date, nombre_morts, cause=None):
+    def ajouter_mortalite(
+        self, bande_id, date, nombre_morts, cause=None, description=None
+    ):
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO mortalites (bande_id, date, nombre_morts, cause)
-            VALUES (?, ?, ?, ?)
-        ''', (bande_id, date, nombre_morts, cause))
+            INSERT INTO mortalites (bande_id, date, nombre_morts, cause, description)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (bande_id, date, nombre_morts, cause, description))
         self.conn.commit()
     
     def ajouter_depense(self, bande_id, date, type_depense, montant, description=None, fournisseur=None):
@@ -151,6 +173,17 @@ class Database:
         cursor.execute('SELECT SUM(montant) FROM depenses WHERE bande_id = ?', (bande_id,))
         result = cursor.fetchone()[0]
         return result if result else 0
+
+    def get_cout_initial(self, bande_id):
+        bande = self.get_bande_info(bande_id)
+        if not bande:
+            return 0
+        nombre_initial = bande[3] or 0
+        prix_achat = bande[4] or 0
+        return nombre_initial * prix_achat
+
+    def get_total_couts(self, bande_id):
+        return self.get_cout_initial(bande_id) + self.get_total_depenses(bande_id)
     
     def get_total_ventes(self, bande_id):
         cursor = self.conn.cursor()

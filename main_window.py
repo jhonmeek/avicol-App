@@ -932,8 +932,8 @@ class ProfessionalMainWindow(QMainWindow):
         file_menu.addSeparator()
         
         export_menu = file_menu.addMenu("Exporter")
-        pdf_action = export_menu.addAction("PDF")
-        pdf_action.triggered.connect(self.export_report)
+        report_action = export_menu.addAction("Rapport texte / CSV")
+        report_action.triggered.connect(self.export_report)
         excel_action = export_menu.addAction("Excel / CSV")
         excel_action.triggered.connect(self.export_bandes)
         image_action = export_menu.addAction("Capture de l'écran")
@@ -1320,8 +1320,16 @@ class ProfessionalMainWindow(QMainWindow):
         mortalites_layout.addLayout(mortalites_header)
         
         self.mortalites_table = QTableWidget()
-        self.mortalites_table.setColumnCount(6)
-        self.mortalites_table.setHorizontalHeaderLabels(["Date", "Bande", "Nombre", "Cause", "Taux", "Actions"])
+        self.mortalites_table.setColumnCount(7)
+        self.mortalites_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Nombre",
+            "Cause",
+            "Observation",
+            "Taux",
+            "Actions",
+        ])
         mortalites_layout.addWidget(self.mortalites_table)
         
         # Onglet Dépenses
@@ -1815,9 +1823,9 @@ class ProfessionalMainWindow(QMainWindow):
                     initial = int(bande[3] or 0)
                     restants = self.db.get_poulets_restants(bande_id)
                     morts = self.db.get_total_mortalites(bande_id)
-                    depenses = self.db.get_total_depenses(bande_id) or 0
+                    cout_total = self.db.get_total_couts(bande_id) or 0
                     ventes = self.db.get_total_ventes(bande_id) or 0
-                    benefice = ventes - depenses
+                    benefice = ventes - cout_total
                     mortalite = (morts / initial * 100) if initial else 0
 
                     values = [
@@ -1893,6 +1901,8 @@ class ProfessionalMainWindow(QMainWindow):
             # Récupérer les données
             total_morts = self.db.get_total_mortalites(self.current_bande_id) or 0
             total_depenses = self.db.get_total_depenses(self.current_bande_id) or 0
+            cout_initial = self.db.get_cout_initial(self.current_bande_id) or 0
+            total_couts = self.db.get_total_couts(self.current_bande_id) or 0
             total_ventes = self.db.get_total_ventes(self.current_bande_id) or 0
             restants = self.db.get_poulets_restants(self.current_bande_id) or 0
             total_vendus = self.db.get_total_vendus(self.current_bande_id) or 0
@@ -1900,10 +1910,10 @@ class ProfessionalMainWindow(QMainWindow):
             # Calculs
             nombre_initial = bande_info[3]
             taux_mortalite = (total_morts / nombre_initial * 100) if nombre_initial > 0 else 0
-            benefice = total_ventes - total_depenses
+            benefice = total_ventes - total_couts
             prix_moyen = total_ventes / total_vendus if total_vendus > 0 else 0
             efficacite = (total_vendus / nombre_initial * 100) if nombre_initial > 0 else 0
-            roi = (benefice / total_depenses * 100) if total_depenses > 0 else 0
+            roi = (benefice / total_couts * 100) if total_couts > 0 else 0
             
             # Mettre à jour les cartes
             if hasattr(self, 'cards'):
@@ -1920,8 +1930,8 @@ class ProfessionalMainWindow(QMainWindow):
                 )
                 
                 self.cards['depenses'].update_value(
-                    f"{total_depenses:,.0f}",
-                    "FCFA"
+                    f"{total_couts:,.0f}",
+                    f"FCFA - achat {cout_initial:,.0f} + dépenses {total_depenses:,.0f}"
                 )
                 
                 self.cards['recettes'].update_value(
@@ -2039,7 +2049,7 @@ class ProfessionalMainWindow(QMainWindow):
             
             cursor.execute('''
                 SELECT 'SAN' as icon, date, 'Mortalité' as type, 
-                       CONCAT(nombre_morts, ' poulets') as description,
+                       nombre_morts || ' poulets' as description,
                        NULL as montant, cause as info
                 FROM mortalites 
                 WHERE bande_id = ?
@@ -2051,7 +2061,7 @@ class ProfessionalMainWindow(QMainWindow):
                 WHERE bande_id = ?
                 UNION ALL
                 SELECT 'VTE' as icon, date, 'Vente' as type, 
-                       CONCAT(nombre_poulets, ' poulets') as description,
+                       nombre_poulets || ' poulets' as description,
                        montant_total, '' as info
                 FROM ventes 
                 WHERE bande_id = ?
@@ -2136,7 +2146,8 @@ class ProfessionalMainWindow(QMainWindow):
         if hasattr(self, "mortalites_table"):
             rows = cursor.execute(
                 """
-                SELECT m.date, b.nom_bande, m.nombre_morts, m.cause
+                SELECT m.date, b.nom_bande, m.nombre_morts, m.cause,
+                       m.description
                 FROM mortalites m
                 LEFT JOIN bandes b ON b.id = m.bande_id
                 ORDER BY m.date DESC, m.id DESC
@@ -2144,7 +2155,15 @@ class ProfessionalMainWindow(QMainWindow):
             ).fetchall()
             self.mortalites_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
-                values = [row[0], row[1] or "", row[2], row[3] or "", "", ""]
+                values = [
+                    row[0],
+                    row[1] or "",
+                    row[2],
+                    row[3] or "",
+                    row[4] or "",
+                    "",
+                    "",
+                ]
                 for column, value in enumerate(values):
                     self.mortalites_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
@@ -2307,6 +2326,8 @@ class ProfessionalMainWindow(QMainWindow):
         bandes = self.db.get_bandes()
         total_initial = sum(int(row[3] or 0) for row in bandes)
         total_depenses = sum(self.db.get_total_depenses(row[0]) for row in bandes)
+        cout_initial = sum(self.db.get_cout_initial(row[0]) for row in bandes)
+        total_couts = total_depenses + cout_initial
         total_ventes = sum(self.db.get_total_ventes(row[0]) for row in bandes)
         total_morts = sum(self.db.get_total_mortalites(row[0]) for row in bandes)
         report = (
@@ -2316,9 +2337,11 @@ class ProfessionalMainWindow(QMainWindow):
             f"Bandes enregistrées : {len(bandes)}\n"
             f"Effectif initial cumulé : {total_initial:,}\n"
             f"Mortalités cumulées : {total_morts:,}\n"
-            f"Dépenses cumulées : {total_depenses:,.0f} FCFA\n"
+            f"Coût initial cumulé : {cout_initial:,.0f} FCFA\n"
+            f"Dépenses opérationnelles : {total_depenses:,.0f} FCFA\n"
+            f"Coût total : {total_couts:,.0f} FCFA\n"
             f"Recettes cumulées : {total_ventes:,.0f} FCFA\n"
-            f"Résultat net : {total_ventes - total_depenses:,.0f} FCFA\n"
+            f"Résultat net : {total_ventes - total_couts:,.0f} FCFA\n"
         )
         self.report_preview.setPlainText(report)
 
@@ -2345,14 +2368,23 @@ class ProfessionalMainWindow(QMainWindow):
             with open(path, "w", newline="", encoding="utf-8-sig") as output:
                 writer = csv.writer(output, delimiter=";")
                 writer.writerow(
-                    ["Bande", "Effectif initial", "Restants", "Dépenses", "Recettes"]
+                    [
+                        "Bande",
+                        "Effectif initial",
+                        "Restants",
+                        "Dépenses",
+                        "Coût total",
+                        "Recettes",
+                    ]
                 )
                 for bande in bandes:
+                    cout_total = self.db.get_total_couts(bande[0])
                     writer.writerow([
                         bande[1],
                         bande[3],
                         self.db.get_poulets_restants(bande[0]),
                         self.db.get_total_depenses(bande[0]),
+                        cout_total,
                         self.db.get_total_ventes(bande[0]),
                     ])
         else:
@@ -2578,7 +2610,8 @@ class ProfessionalMainWindow(QMainWindow):
                 self.current_bande_id,
                 data['date'],
                 data['nombre'],
-                data['cause']
+                data['cause'],
+                data['description'],
             )
             self.update_dashboard()
             self.load_bandes()

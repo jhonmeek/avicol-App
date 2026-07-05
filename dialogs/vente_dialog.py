@@ -95,9 +95,10 @@ class NouvelleVenteDialog(QDialog):
     def calculer_total(self):
         nombre = self.nombre_input.value()
         total = nombre * self.prix_input.value()
-        marge = total - nombre * 1500
         self.total_label.setText(f"Montant total : {total:,.0f} FCFA")
-        self.marge_label.setText(f"Marge estimée : {marge:,.0f} FCFA")
+        self.marge_label.setText(
+            "Le résultat net sera recalculé avec les coûts réels de la bande."
+        )
 
     def validate_and_accept(self):
         if self.poulets_disponibles <= 0:
