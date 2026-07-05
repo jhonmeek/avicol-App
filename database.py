@@ -177,6 +177,12 @@ class Database:
         self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
         paiement=None
     ):
+        restants = self.get_poulets_restants(bande_id)
+        if nombre_poulets > restants:
+            raise ValueError(
+                f"Vente refusée : {nombre_poulets} sujets demandés pour "
+                f"{restants} disponibles."
+            )
         montant_total = nombre_poulets * prix_unitaire
         cursor = self.conn.cursor()
         cursor.execute('''

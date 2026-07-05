@@ -2674,14 +2674,22 @@ class ProfessionalMainWindow(QMainWindow):
         dialog = NouvelleVenteDialog(self.current_bande_id, poulets_disponibles, self)
         if dialog.exec():
             data = dialog.get_data()
-            self.db.ajouter_vente(
-                self.current_bande_id,
-                data['date'],
-                data['nombre'],
-                data['prix'],
-                data['client'],
-                data['paiement'],
-            )
+            try:
+                self.db.ajouter_vente(
+                    self.current_bande_id,
+                    data['date'],
+                    data['nombre'],
+                    data['prix'],
+                    data['client'],
+                    data['paiement'],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Vente impossible",
+                    str(erreur),
+                )
+                return
             self.update_dashboard()
             self.load_bandes()
             self.show_message(
