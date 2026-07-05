@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
+    QComboBox,
     QDateEdit,
     QDialog,
     QDoubleSpinBox,
@@ -28,6 +29,10 @@ class NouvelleBandeDialog(QDialog):
             self.date_input.setDate(QDate.fromString(str(bande[2]), "yyyy-MM-dd"))
             self.nombre_input.setValue(int(bande[3]))
             self.prix_input.setValue(float(bande[4] or 0))
+            activite_actuelle = bande[6] if len(bande) > 6 else "chair"
+            index = self.activite_combo.findData(activite_actuelle)
+            self.activite_combo.setCurrentIndex(max(0, index))
+            self.activite_combo.setEnabled(False)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -44,6 +49,12 @@ class NouvelleBandeDialog(QDialog):
         group = QGroupBox("Informations générales")
         form = QFormLayout(group)
         prepare_form(form)
+
+        self.activite_combo = QComboBox()
+        self.activite_combo.addItem("Poulet de chair", "chair")
+        self.activite_combo.addItem("Poule pondeuse", "ponte")
+        self.activite_combo.currentIndexChanged.connect(self.update_prix_suffix)
+        form.addRow("Activité", self.activite_combo)
 
         self.nom_input = QLineEdit()
         self.nom_input.setPlaceholderText("Ex. Bande A - Juin 2026")
@@ -84,6 +95,12 @@ class NouvelleBandeDialog(QDialog):
         buttons.addWidget(save)
         layout.addLayout(buttons)
         self.calculer_cout()
+        self.update_prix_suffix()
+
+    def update_prix_suffix(self):
+        activite = self.activite_combo.currentData()
+        suffixe = " FCFA / poulette" if activite == "ponte" else " FCFA / poussin"
+        self.prix_input.setSuffix(suffixe)
 
     def calculer_cout(self):
         total = self.nombre_input.value() * self.prix_input.value()
@@ -102,4 +119,5 @@ class NouvelleBandeDialog(QDialog):
             "date": self.date_input.date().toString("yyyy-MM-dd"),
             "nombre": self.nombre_input.value(),
             "prix": self.prix_input.value(),
+            "activite": self.activite_combo.currentData(),
         }

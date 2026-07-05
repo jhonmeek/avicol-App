@@ -1218,9 +1218,9 @@ class ProfessionalMainWindow(QMainWindow):
         all_layout = QVBoxLayout(all_bandes_tab)
         
         self.bandes_table = QTableWidget()
-        self.bandes_table.setColumnCount(8)
-        self.bandes_table.setHorizontalHeaderLabels(["ID", "Nom", "Date début", "Initial", "Restants", 
-                                                     "Mortalité", "Bénéfice", "Actions"])
+        self.bandes_table.setColumnCount(9)
+        self.bandes_table.setHorizontalHeaderLabels(["ID", "Nom", "Activité", "Date début", "Initial",
+                                                     "Restants", "Mortalité", "Bénéfice", "Actions"])
         self.bandes_table.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch
         )
@@ -1228,9 +1228,9 @@ class ProfessionalMainWindow(QMainWindow):
             0, QHeaderView.ResizeMode.ResizeToContents
         )
         self.bandes_table.horizontalHeader().setSectionResizeMode(
-            7, QHeaderView.ResizeMode.Fixed
+            8, QHeaderView.ResizeMode.Fixed
         )
-        self.bandes_table.setColumnWidth(7, 220)
+        self.bandes_table.setColumnWidth(8, 220)
         self.bandes_table.verticalHeader().setVisible(False)
         self.bandes_table.verticalHeader().setDefaultSectionSize(52)
         all_layout.addWidget(self.bandes_table)
@@ -1898,9 +1898,14 @@ class ProfessionalMainWindow(QMainWindow):
                     benefice = ventes - cout_total
                     mortalite = (morts / initial * 100) if initial else 0
 
+                    activite = bande[6] if len(bande) > 6 and bande[6] else "chair"
+                    activite_label = (
+                        "Poule pondeuse" if activite == "ponte" else "Poulet de chair"
+                    )
                     values = [
                         bande_id,
                         bande[1],
+                        activite_label,
                         bande[2],
                         f"{initial:,}",
                         f"{restants:,}",
@@ -1941,7 +1946,7 @@ class ProfessionalMainWindow(QMainWindow):
                     btn_layout.addWidget(edit_btn)
                     btn_layout.addStretch()
                     
-                    self.bandes_table.setCellWidget(row, 7, btn_widget)
+                    self.bandes_table.setCellWidget(row, 8, btn_widget)
                     self.bandes_table.setRowHeight(row, 52)
 
             self.load_transactions()
@@ -2785,7 +2790,8 @@ class ProfessionalMainWindow(QMainWindow):
                 data['nom'],
                 data['date'],
                 data['nombre'],
-                data['prix']
+                data['prix'],
+                activite=data['activite'],
             )
             self.load_bandes()
             self.show_message(
