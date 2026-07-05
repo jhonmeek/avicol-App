@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -52,6 +52,8 @@ class Database:
             self._migration_4_ponte_mvp()
         elif version == 5:
             self._migration_5_stocks()
+        elif version == 6:
+            self._migration_6_sanitaire()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -222,6 +224,31 @@ class Database:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_mouvements_stock_stock_date "
             "ON mouvements_stock (stock_id, date)"
+        )
+
+    def _migration_6_sanitaire(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS interventions_sanitaires (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                type_intervention TEXT NOT NULL
+                    CHECK (type_intervention IN ('vaccination', 'traitement')),
+                produit TEXT NOT NULL,
+                dose TEXT,
+                intervenant TEXT,
+                prochaine_echeance DATE,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interventions_bande_date "
+            "ON interventions_sanitaires (bande_id, date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interventions_echeance "
+            "ON interventions_sanitaires (prochaine_echeance)"
         )
 
     def _ensure_column(self, table, column, definition):
@@ -713,6 +740,79 @@ class Database:
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, quantite_kg, type_aliment, observation))
         self.conn.commit()
+
+    def ajouter_intervention_sanitaire(
+        self, bande_id, date, type_intervention, produit, dose=None,
+        intervenant=None, prochaine_echeance=None
+    ):
+        if type_intervention not in ('vaccination', 'traitement'):
+            raise ValueError("Type d'intervention invalide.")
+        if not produit:
+            raise ValueError("Le produit est obligatoire.")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO interventions_sanitaires (
+                bande_id, date, type_intervention, produit, dose, intervenant,
+                prochaine_echeance
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            bande_id, date, type_intervention, produit, dose, intervenant,
+            prochaine_echeance
+        ))
+        self.conn.commit()
+
+    def get_interventions_sanitaires(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, type_intervention, produit, dose,
+                   intervenant, prochaine_echeance
+            FROM interventions_sanitaires
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_interventions_a_venir(self, date_reference):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT id, bande_id, date, type_intervention, produit, dose,
+                   intervenant, prochaine_echeance
+            FROM interventions_sanitaires
+            WHERE prochaine_echeance IS NOT NULL AND prochaine_echeance >= ?
+            ORDER BY prochaine_echeance ASC, id ASC
+            ''',
+            (date_reference,),
+        )
+        return cursor.fetchall()
+
+    def get_rentabilite_par_activite(self):
+        resultat = {
+            'chair': {'recettes': 0, 'couts': 0, 'benefice': 0, 'nb_lots': 0},
+            'ponte': {'recettes': 0, 'couts': 0, 'benefice': 0, 'nb_lots': 0},
+        }
+        for bande in self.get_bandes():
+            bande_id = bande[0]
+            activite = bande[6] if len(bande) > 6 and bande[6] else 'chair'
+            if activite not in resultat:
+                activite = 'chair'
+
+            couts = self.get_total_couts(bande_id)
+            recettes = (
+                self.get_total_ventes_oeufs(bande_id)
+                if activite == 'ponte'
+                else self.get_total_ventes(bande_id)
+            )
+            resultat[activite]['recettes'] += recettes
+            resultat[activite]['couts'] += couts
+            resultat[activite]['benefice'] += recettes - couts
+            resultat[activite]['nb_lots'] += 1
+        return resultat
 
     def close(self):
         self.conn.close()

@@ -1534,6 +1534,39 @@ class ProfessionalMainWindow(QMainWindow):
         ])
         stocks_layout.addWidget(self.stocks_table)
 
+        # Onglet Sanitaire
+        sanitaire_tab = QWidget()
+        sanitaire_layout = QVBoxLayout(sanitaire_tab)
+        sanitaire_layout.setContentsMargins(10, 10, 10, 10)
+
+        sanitaire_header = QHBoxLayout()
+        sanitaire_header.addWidget(QLabel("Suivi sanitaire"))
+        sanitaire_header.addStretch()
+
+        add_intervention_btn = QPushButton("Ajouter une intervention")
+        add_intervention_btn.setStyleSheet(self.theme_manager.get_button_style("primary", "small"))
+        add_intervention_btn.clicked.connect(self.ajouter_intervention)
+        sanitaire_header.addWidget(add_intervention_btn)
+
+        sanitaire_layout.addLayout(sanitaire_header)
+
+        self.echeances_label = QLabel("Aucune échéance à venir.")
+        self.echeances_label.setObjectName("summary")
+        sanitaire_layout.addWidget(self.echeances_label)
+
+        self.interventions_table = QTableWidget()
+        self.interventions_table.setColumnCount(7)
+        self.interventions_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Type",
+            "Produit",
+            "Dose",
+            "Intervenant",
+            "Prochaine échéance",
+        ])
+        sanitaire_layout.addWidget(self.interventions_table)
+
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
@@ -1541,6 +1574,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.trans_tabs.addTab(pesees_tab, "Pesées")
         self.trans_tabs.addTab(oeufs_tab, "Œufs")
         self.trans_tabs.addTab(stocks_tab, "Stocks")
+        self.trans_tabs.addTab(sanitaire_tab, "Sanitaire")
         
         layout.addWidget(self.trans_tabs)
         
@@ -2307,9 +2341,17 @@ class ProfessionalMainWindow(QMainWindow):
                        NULL as montant, effectif_pese || ' sujets peses' as info
                 FROM pesees
                 WHERE bande_id = ?
+                UNION ALL
+                SELECT 'INT' as icon, date, 'Sanitaire' as type,
+                       produit as description,
+                       NULL as montant,
+                       COALESCE(type_intervention, '') as info
+                FROM interventions_sanitaires
+                WHERE bande_id = ?
                 ORDER BY date DESC
                 LIMIT 10
             ''', (
+                self.current_bande_id,
                 self.current_bande_id,
                 self.current_bande_id,
                 self.current_bande_id,
@@ -2615,6 +2657,48 @@ class ProfessionalMainWindow(QMainWindow):
                         row_index, column, QTableWidgetItem(str(value))
                     )
 
+        if hasattr(self, "interventions_table"):
+            libelles_type = {
+                "vaccination": "Vaccination",
+                "traitement": "Traitement",
+            }
+            rows = cursor.execute(
+                """
+                SELECT i.date, b.nom_bande, i.type_intervention, i.produit,
+                       i.dose, i.intervenant, i.prochaine_echeance
+                FROM interventions_sanitaires i
+                LEFT JOIN bandes b ON b.id = i.bande_id
+                ORDER BY i.date DESC, i.id DESC
+                """
+            ).fetchall()
+            self.interventions_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[0],
+                    row[1] or "",
+                    libelles_type.get(row[2], row[2]),
+                    row[3],
+                    row[4] or "",
+                    row[5] or "",
+                    row[6] or "",
+                ]
+                for column, value in enumerate(values):
+                    self.interventions_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
+        if hasattr(self, "echeances_label"):
+            aujourd_hui = datetime.now().strftime("%Y-%m-%d")
+            a_venir = self.db.get_interventions_a_venir(aujourd_hui)
+            if a_venir:
+                prochaine = a_venir[0]
+                self.echeances_label.setText(
+                    f"{len(a_venir)} échéance(s) à venir - prochaine : "
+                    f"{prochaine[4]} le {prochaine[7]}"
+                )
+            else:
+                self.echeances_label.setText("Aucune échéance à venir.")
+
         self.filter_transactions()
 
     def filter_transactions(self):
@@ -2638,6 +2722,7 @@ class ProfessionalMainWindow(QMainWindow):
             (self.ventes_table, 1),
             (self.aliment_table, 1),
             (self.pesees_table, 1),
+            (self.interventions_table, 1),
         )
         for table, bande_column in tables:
             for row in range(table.rowCount()):
@@ -2704,14 +2789,18 @@ class ProfessionalMainWindow(QMainWindow):
             path += ".csv"
         with open(path, "w", newline="", encoding="utf-8-sig") as output:
             writer = csv.writer(output, delimiter=";")
+            export_columns = [
+                column for column in range(table.columnCount())
+                if table.horizontalHeaderItem(column).text() != "Actions"
+            ]
             writer.writerow([
                 table.horizontalHeaderItem(column).text()
-                for column in range(table.columnCount() - 1)
+                for column in export_columns
             ])
             for row in range(table.rowCount()):
                 writer.writerow([
                     table.item(row, column).text() if table.item(row, column) else ""
-                    for column in range(table.columnCount() - 1)
+                    for column in export_columns
                 ])
         self.show_message(
             QMessageBox.Icon.Information, "Export terminé", f"Fichier créé :\n{path}"
@@ -2725,9 +2814,16 @@ class ProfessionalMainWindow(QMainWindow):
         cout_initial = sum(self.db.get_cout_initial(row[0]) for row in bandes)
         total_couts = total_depenses + cout_initial
         total_ventes = sum(self.db.get_total_ventes(row[0]) for row in bandes)
+        total_ventes_oeufs = sum(
+            self.db.get_total_ventes_oeufs(row[0]) for row in bandes
+        )
+        total_recettes = total_ventes + total_ventes_oeufs
         total_morts = sum(self.db.get_total_mortalites(row[0]) for row in bandes)
         total_aliment = sum(self.db.get_total_aliment_kg(row[0]) for row in bandes)
         bandes_avec_pesee = sum(1 for row in bandes if self.db.get_latest_pesee(row[0]))
+        rentabilite = self.db.get_rentabilite_par_activite()
+        chair = rentabilite["chair"]
+        ponte = rentabilite["ponte"]
         report = (
             f"AVICOLE PRO\n{report_type.upper()}\n"
             f"Édité le {datetime.now():%d/%m/%Y à %H:%M}\n"
@@ -2738,10 +2834,21 @@ class ProfessionalMainWindow(QMainWindow):
             f"Coût initial cumulé : {cout_initial:,.0f} FCFA\n"
             f"Dépenses opérationnelles : {total_depenses:,.0f} FCFA\n"
             f"Coût total : {total_couts:,.0f} FCFA\n"
-            f"Recettes cumulées : {total_ventes:,.0f} FCFA\n"
-            f"Résultat net : {total_ventes - total_couts:,.0f} FCFA\n"
+            f"Recettes poulets : {total_ventes:,.0f} FCFA\n"
+            f"Recettes œufs : {total_ventes_oeufs:,.0f} FCFA\n"
+            f"Résultat net global : {total_recettes - total_couts:,.0f} FCFA\n"
             f"Aliment distribué : {total_aliment:,.1f} kg\n"
             f"Bandes avec pesée : {bandes_avec_pesee}\n"
+            f"\nRENTABILITÉ PAR ACTIVITÉ\n"
+            f"{'-' * 58}\n"
+            f"Poulet de chair - {chair['nb_lots']} lot(s)\n"
+            f"  Recettes : {chair['recettes']:,.0f} FCFA\n"
+            f"  Coûts    : {chair['couts']:,.0f} FCFA\n"
+            f"  Résultat : {chair['benefice']:,.0f} FCFA\n"
+            f"Poule pondeuse - {ponte['nb_lots']} lot(s)\n"
+            f"  Recettes : {ponte['recettes']:,.0f} FCFA\n"
+            f"  Coûts    : {ponte['couts']:,.0f} FCFA\n"
+            f"  Résultat : {ponte['benefice']:,.0f} FCFA\n"
         )
         self.report_preview.setPlainText(report)
 
@@ -2770,11 +2877,14 @@ class ProfessionalMainWindow(QMainWindow):
                 writer.writerow(
                     [
                         "Bande",
+                        "Activité",
                         "Effectif initial",
                         "Restants",
                         "Dépenses",
                         "Coût total",
-                        "Recettes",
+                        "Recettes poulets",
+                        "Recettes œufs",
+                        "Recettes activité",
                         "Aliment kg",
                         "Dernier poids g",
                         "IC",
@@ -2784,13 +2894,22 @@ class ProfessionalMainWindow(QMainWindow):
                 for bande in bandes:
                     cout_total = self.db.get_total_couts(bande[0])
                     zootech = self._zootechnie_metrics_for_bande(bande)
+                    activite = bande[6] if len(bande) > 6 and bande[6] else "chair"
+                    recettes_poulets = self.db.get_total_ventes(bande[0])
+                    recettes_oeufs = self.db.get_total_ventes_oeufs(bande[0])
+                    recettes_activite = (
+                        recettes_oeufs if activite == "ponte" else recettes_poulets
+                    )
                     writer.writerow([
                         bande[1],
+                        activite,
                         bande[3],
                         self.db.get_poulets_restants(bande[0]),
                         self.db.get_total_depenses(bande[0]),
                         cout_total,
-                        self.db.get_total_ventes(bande[0]),
+                        recettes_poulets,
+                        recettes_oeufs,
+                        recettes_activite,
                         round(zootech["total_aliment_kg"], 2),
                         round(zootech["poids_moyen_g"], 0),
                         round(zootech["ic"], 2),
@@ -3294,6 +3413,44 @@ class ProfessionalMainWindow(QMainWindow):
 
     def ajouter_sortie_stock(self):
         self._ouvrir_mouvement_stock("sortie")
+
+    def ajouter_intervention(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        from dialogs import SaisieInterventionDialog
+
+        dialog = SaisieInterventionDialog(self.current_bande_id, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_intervention_sanitaire(
+                    self.current_bande_id,
+                    data["date"],
+                    data["type_intervention"],
+                    data["produit"],
+                    data["dose"],
+                    data["intervenant"],
+                    data["prochaine_echeance"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Intervention enregistrée",
+                "L'intervention sanitaire a été ajoutée au suivi.",
+            )
 
     def ajouter_vente(self):
         if not self.current_bande_id:
