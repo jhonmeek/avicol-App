@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -46,6 +46,8 @@ class Database:
             self._migration_1_baseline()
         elif version == 2:
             self._migration_2_zootechnie_chair()
+        elif version == 3:
+            self._migration_3_poids_vente()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -135,6 +137,11 @@ class Database:
             )
         ''')
         self._create_zootechnie_indexes()
+
+    def _migration_3_poids_vente(self):
+        # Poids total vendu (kg), pour un IC de fin de cycle correct meme
+        # apres que tous les sujets d'un lot ont ete vendus.
+        self._ensure_column("ventes", "poids_total", "REAL")
 
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
@@ -251,7 +258,7 @@ class Database:
 
     def ajouter_vente(
         self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
-        paiement=None
+        paiement=None, poids_total=None
     ):
         restants = self.get_poulets_restants(bande_id)
         if nombre_poulets > restants:
@@ -259,17 +266,19 @@ class Database:
                 f"Vente refusée : {nombre_poulets} sujets demandés pour "
                 f"{restants} disponibles."
             )
+        if poids_total is not None and poids_total < 0:
+            raise ValueError("Le poids total vendu ne peut pas être négatif.")
         montant_total = nombre_poulets * prix_unitaire
         cursor = self.conn.cursor()
         cursor.execute('''
             INSERT INTO ventes (
                 bande_id, date, nombre_poulets, prix_unitaire, montant_total,
-                client, paiement
+                client, paiement, poids_total
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             bande_id, date, nombre_poulets, prix_unitaire, montant_total,
-            client, paiement
+            client, paiement, poids_total
         ))
         self.conn.commit()
 
@@ -321,6 +330,14 @@ class Database:
     def get_total_vendus(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(nombre_poulets) FROM ventes WHERE bande_id = ?', (bande_id,))
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def get_total_poids_vendu(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT SUM(poids_total) FROM ventes WHERE bande_id = ?', (bande_id,)
+        )
         result = cursor.fetchone()[0]
         return result if result else 0
 

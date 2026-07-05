@@ -44,3 +44,17 @@ def test_bornes_indicateurs_zootechniques():
     assert indicators.indice_consommation(100, 0) == 0.0
     assert indicators.gain_moyen_quotidien(1800, 1700, 7) == 0.0
     assert indicators.gain_moyen_quotidien(250, 1800, 0) == 0.0
+
+
+def test_poids_vif_produit_kg_combine_restant_et_vendu():
+    assert indicators.poids_vif_produit_kg(300.0, 600.0) == pytest.approx(900.0)
+
+
+def test_ic_fin_de_cycle_ne_s_effondre_pas_a_zero():
+    # Lot entierement vendu : plus aucun sujet restant, mais le poids vendu
+    # doit rester au denominateur de l'IC (sinon l'indice retombe a 0).
+    poids_vif_restant = indicators.poids_vif_estime_kg(0, 1800)  # 0 restant
+    poids_produit = indicators.poids_vif_produit_kg(poids_vif_restant, 1800.0)
+    ic = indicators.indice_consommation(3240, poids_produit)
+    assert poids_vif_restant == 0.0
+    assert ic == pytest.approx(1.8)

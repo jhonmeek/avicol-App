@@ -46,6 +46,38 @@ def test_pesees_ordonnees_et_derniere_pesee(tmp_path):
     assert [row[2] for row in rows] == ["2026-01-29", "2026-01-08"]
 
 
+def test_migration_phase2b_colonne_poids_total(tmp_path):
+    db = Database(db_name=tmp_path / "poids.db")
+    colonnes = {
+        row[1] for row in db.conn.execute("PRAGMA table_info(ventes)").fetchall()
+    }
+    db.close()
+    assert "poids_total" in colonnes
+
+
+def test_vente_avec_poids_total_est_totalisee(tmp_path):
+    db = Database(db_name=tmp_path / "poids2.db")
+    bande_id = db.ajouter_bande("Lot chair", "2026-01-01", 1000, 500)
+
+    db.ajouter_vente(bande_id, "2026-02-01", 600, 2000, poids_total=1080.0)
+    db.ajouter_vente(bande_id, "2026-02-02", 400, 2000, poids_total=720.0)
+
+    total = db.get_total_poids_vendu(bande_id)
+    db.close()
+    assert total == pytest.approx(1800.0)
+
+
+def test_vente_sans_poids_total_ne_casse_pas_le_total(tmp_path):
+    db = Database(db_name=tmp_path / "poids3.db")
+    bande_id = db.ajouter_bande("Lot chair", "2026-01-01", 1000, 500)
+
+    db.ajouter_vente(bande_id, "2026-02-01", 1000, 2000)  # pas de poids_total
+
+    total = db.get_total_poids_vendu(bande_id)
+    db.close()
+    assert total == 0
+
+
 def test_zootechnie_refuse_valeurs_invalides(tmp_path):
     db = Database(db_name=tmp_path / "invalides.db")
     bande_id = db.ajouter_bande("Lot chair", "2026-01-01", 1000, 500)

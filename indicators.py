@@ -44,6 +44,15 @@ def poids_vif_estime_kg(effectif_present, poids_moyen_g):
     return effectif_present * poids_moyen_g / 1000
 
 
+def poids_vif_produit_kg(poids_vif_restant_kg, poids_vendu_kg):
+    """Poids vif total produit par le lot = biomasse restante + poids vendu.
+
+    Sans le poids vendu, l'IC s'effondre a 0 des que le lot est integralement
+    vendu (plus aucun sujet ne reste au denominateur).
+    """
+    return (poids_vif_restant_kg or 0.0) + (poids_vendu_kg or 0.0)
+
+
 def indice_consommation(aliment_kg, poids_vif_produit_kg):
     """IC/FCR = kg d'aliment consommes / kg de poids vif produit."""
     return (aliment_kg / poids_vif_produit_kg) if poids_vif_produit_kg > 0 else 0.0
