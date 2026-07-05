@@ -331,6 +331,20 @@ class Database:
         ''', (bande_id, date, nombre_morts, cause, description))
         self.conn.commit()
 
+    def get_mortalites(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, nombre_morts, cause, description
+            FROM mortalites
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
     def ajouter_depense(self, bande_id, date, type_depense, montant, description=None, fournisseur=None):
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -338,6 +352,20 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (bande_id, date, type_depense, montant, description, fournisseur))
         self.conn.commit()
+
+    def get_depenses(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, type_depense, description, montant, fournisseur
+            FROM depenses
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
 
     def ajouter_consommation_aliment(
         self, bande_id, date, quantite_kg, type_aliment=None, observation=None
@@ -686,18 +714,39 @@ class Database:
         ''', (stock_id, date, type_mouvement, quantite, bande_id, motif))
         self.conn.commit()
 
-    def get_mouvements_stock(self, stock_id=None):
+    def get_mouvements_stock(self, stock_id=None, bande_id=None):
         cursor = self.conn.cursor()
         query = '''
             SELECT id, stock_id, date, type_mouvement, quantite, bande_id, motif
             FROM mouvements_stock
         '''
-        params = ()
+        filters = []
+        params = []
         if stock_id is not None:
-            query += ' WHERE stock_id = ?'
-            params = (stock_id,)
+            filters.append('stock_id = ?')
+            params.append(stock_id)
+        if bande_id is not None:
+            filters.append('bande_id = ?')
+            params.append(bande_id)
+        if filters:
+            query += ' WHERE ' + ' AND '.join(filters)
         query += ' ORDER BY date DESC, id DESC'
-        cursor.execute(query, params)
+        cursor.execute(query, tuple(params))
+        return cursor.fetchall()
+
+    def get_mouvements_stock_par_bande(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT m.id, m.stock_id, m.date, m.type_mouvement, m.quantite,
+                   m.bande_id, m.motif, s.nom_article, s.categorie, s.unite
+            FROM mouvements_stock m
+            JOIN stocks s ON s.id = m.stock_id
+            WHERE m.bande_id = ?
+            ORDER BY m.date DESC, m.id DESC
+            ''',
+            (bande_id,),
+        )
         return cursor.fetchall()
 
     def get_articles_sous_seuil(self):
@@ -762,6 +811,21 @@ class Database:
         ))
         self.conn.commit()
 
+    def get_ventes(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, nombre_poulets, prix_unitaire,
+                   montant_total, client, paiement, poids_total
+            FROM ventes
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
     def get_interventions_sanitaires(self, bande_id=None):
         cursor = self.conn.cursor()
         query = '''
@@ -813,6 +877,16 @@ class Database:
             resultat[activite]['benefice'] += recettes - couts
             resultat[activite]['nb_lots'] += 1
         return resultat
+
+    def get_fiche_lot_agasa(self, bande_id):
+        import reporting
+
+        return reporting.build_fiche_lot_agasa(self, bande_id)
+
+    def get_synthese_direction(self, date_reference=None):
+        import reporting
+
+        return reporting.build_synthese_direction(self, date_reference)
 
     def close(self):
         self.conn.close()

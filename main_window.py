@@ -13,6 +13,7 @@ import shutil
 
 import backup as backup_module
 import indicators
+import reporting
 from app_paths import ensure_user_directories
 from database import Database
 from theme_avicole import AvicoleThemeManager
@@ -1716,7 +1717,14 @@ class ProfessionalMainWindow(QMainWindow):
         
         # Type de rapport
         report_type = QComboBox()
-        report_type.addItems(["Rapport financier", "Rapport production", "Rapport sanitaire", "Rapport complet"])
+        report_type.addItems([
+            "Rapport financier",
+            "Rapport production",
+            "Rapport sanitaire",
+            "Rapport complet",
+            "Synthèse direction",
+            "Fiche lot AGASA",
+        ])
         self.report_type_combo = report_type
         options_layout.addWidget(QLabel("Type de rapport:"), 0, 0)
         options_layout.addWidget(report_type, 0, 1)
@@ -2808,6 +2816,25 @@ class ProfessionalMainWindow(QMainWindow):
 
     def generate_report(self):
         report_type = self.report_type_combo.currentText()
+        if report_type == "Synthèse direction":
+            synthese = self.db.get_synthese_direction()
+            self.report_preview.setPlainText(
+                reporting.synthese_direction_text(synthese)
+            )
+            return
+        if report_type == "Fiche lot AGASA":
+            if not self.current_bande_id:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Aucune bande sélectionnée",
+                    "Veuillez sélectionner une bande active pour générer la fiche AGASA.",
+                )
+                return
+            fiche = self.db.get_fiche_lot_agasa(self.current_bande_id)
+            self.report_preview.setPlainText(
+                reporting.fiche_lot_agasa_text(fiche)
+            )
+            return
         bandes = self.db.get_bandes()
         total_initial = sum(int(row[3] or 0) for row in bandes)
         total_depenses = sum(self.db.get_total_depenses(row[0]) for row in bandes)
@@ -2855,9 +2882,19 @@ class ProfessionalMainWindow(QMainWindow):
     def export_report(self):
         if not hasattr(self, "report_preview"):
             self.show_page("rapports")
+        csv_format = self.report_format_combo.currentText() == "CSV"
+        report_type = self.report_type_combo.currentText()
+        if csv_format and report_type == "Fiche lot AGASA" and not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Aucune bande sélectionnée",
+                "Veuillez sélectionner une bande active pour exporter la fiche AGASA.",
+            )
+            return
         if not self.report_preview.toPlainText().strip():
             self.generate_report()
-        csv_format = self.report_format_combo.currentText() == "CSV"
+        if not csv_format and not self.report_preview.toPlainText().strip():
+            return
         extension = "csv" if csv_format else "txt"
         file_filter = "Fichier CSV (*.csv)" if csv_format else "Document texte (*.txt)"
         path, _ = QFileDialog.getSaveFileName(
@@ -2870,6 +2907,24 @@ class ProfessionalMainWindow(QMainWindow):
             return
         if not path.lower().endswith(f".{extension}"):
             path += f".{extension}"
+        if csv_format and report_type in ("Synthèse direction", "Fiche lot AGASA"):
+            if report_type == "Synthèse direction":
+                rows = reporting.synthese_direction_csv_rows(
+                    self.db.get_synthese_direction()
+                )
+            else:
+                rows = reporting.fiche_lot_agasa_csv_rows(
+                    self.db.get_fiche_lot_agasa(self.current_bande_id)
+                )
+            with open(path, "w", newline="", encoding="utf-8-sig") as output:
+                writer = csv.writer(output, delimiter=";")
+                writer.writerows(rows)
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Rapport exporté",
+                f"Fichier créé :\n{path}",
+            )
+            return
         if csv_format:
             bandes = self.db.get_bandes()
             with open(path, "w", newline="", encoding="utf-8-sig") as output:
