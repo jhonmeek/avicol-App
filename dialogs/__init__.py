@@ -5,6 +5,8 @@ from .depense_dialog import NouvelleDepenseDialog
 from .vente_dialog import NouvelleVenteDialog
 from .aliment_dialog import SaisieAlimentDialog
 from .pesee_dialog import SaisiePeseeDialog
+from .ponte_dialog import SaisiePonteDialog
+from .vente_oeufs_dialog import NouvelleVenteOeufsDialog
 
 __all__ = [
     'NouvelleBandeDialog',
@@ -13,4 +15,6 @@ __all__ = [
     'NouvelleVenteDialog',
     'SaisieAlimentDialog',
     'SaisiePeseeDialog',
+    'SaisiePonteDialog',
+    'NouvelleVenteOeufsDialog',
 ]
