@@ -47,3 +47,33 @@ def test_mortalite_fonctionne_sur_lot_ponte(tmp_path):
     restants = db.get_poulets_restants(bande_id)
     db.close()
     assert restants == 195
+
+
+def _bande_ponte(db, effectif=200):
+    return db.ajouter_bande(
+        "Lot Pondeuses", "2026-01-01", effectif, 1500, activite="ponte"
+    )
+
+
+def test_ajouter_ponte_credite_stock_et_totalise(tmp_path):
+    db = Database(db_name=tmp_path / "ponte1.db")
+    bande_id = _bande_ponte(db)
+
+    db.ajouter_ponte(bande_id, "2026-03-01", 180)
+    db.ajouter_ponte(bande_id, "2026-03-02", 185)
+
+    total = db.get_total_oeufs(bande_id)
+    jours = db.get_nombre_jours_ponte(bande_id)
+    rows = db.get_pontes(bande_id)
+    db.close()
+    assert total == 365
+    assert jours == 2
+    assert [row[2] for row in rows] == ["2026-03-02", "2026-03-01"]
+
+
+def test_ajouter_ponte_refuse_valeur_invalide(tmp_path):
+    db = Database(db_name=tmp_path / "ponte2.db")
+    bande_id = _bande_ponte(db)
+    with pytest.raises(ValueError):
+        db.ajouter_ponte(bande_id, "2026-03-01", 0)
+    db.close()

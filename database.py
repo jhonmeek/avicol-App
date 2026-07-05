@@ -305,6 +305,51 @@ class Database:
         ''', (bande_id, date, poids_moyen_g, effectif_pese, observation))
         self.conn.commit()
 
+    def ajouter_ponte(self, bande_id, date, nombre_oeufs, observation=None):
+        if nombre_oeufs <= 0:
+            raise ValueError("Le nombre d'oeufs doit etre superieur a zero.")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
+            VALUES (?, ?, ?, ?)
+        ''', (bande_id, date, nombre_oeufs, observation))
+        cursor.execute('''
+            INSERT INTO mouvements_oeufs (bande_id, date, type_mouvement, quantite)
+            VALUES (?, ?, 'entree_production', ?)
+        ''', (bande_id, date, nombre_oeufs))
+        self.conn.commit()
+
+    def get_total_oeufs(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT SUM(nombre_oeufs) FROM pontes WHERE bande_id = ?', (bande_id,)
+        )
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def get_nombre_jours_ponte(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT COUNT(DISTINCT date) FROM pontes WHERE bande_id = ?',
+            (bande_id,),
+        )
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def get_pontes(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, nombre_oeufs, observation
+            FROM pontes
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
     def ajouter_vente(
         self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
         paiement=None, poids_total=None
