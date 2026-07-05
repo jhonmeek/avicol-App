@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -48,6 +48,8 @@ class Database:
             self._migration_2_zootechnie_chair()
         elif version == 3:
             self._migration_3_poids_vente()
+        elif version == 4:
+            self._migration_4_ponte_mvp()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -142,6 +144,10 @@ class Database:
         # Poids total vendu (kg), pour un IC de fin de cycle correct meme
         # apres que tous les sujets d'un lot ont ete vendus.
         self._ensure_column("ventes", "poids_total", "REAL")
+
+    def _migration_4_ponte_mvp(self):
+        # Colonne d'activite (chair/ponte) sur les lots existants.
+        self._ensure_column("bandes", "activite", "TEXT DEFAULT 'chair'")
 
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
