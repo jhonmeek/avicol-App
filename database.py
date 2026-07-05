@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -56,6 +56,8 @@ class Database:
             self._migration_6_sanitaire()
         elif version == 7:
             self._migration_7_previsions()
+        elif version == 8:
+            self._migration_8_journal_actions()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -285,6 +287,27 @@ class Database:
             "ON previsions_lot (bande_id)"
         )
 
+    def _migration_8_journal_actions(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS journal_actions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date_action TEXT NOT NULL,
+                action TEXT NOT NULL,
+                entite TEXT NOT NULL,
+                entite_id INTEGER,
+                detail TEXT
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_journal_actions_date "
+            "ON journal_actions (date_action)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_journal_actions_entite "
+            "ON journal_actions (entite, entite_id)"
+        )
+
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
         columns = {
@@ -319,6 +342,51 @@ class Database:
             "ON pesees (bande_id, date)"
         )
 
+    def _log_action(self, action, entite, entite_id=None, detail=None, cursor=None):
+        active_cursor = cursor or self.conn.cursor()
+        active_cursor.execute(
+            '''
+            INSERT INTO journal_actions (
+                date_action, action, entite, entite_id, detail
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ''',
+            (
+                datetime.now().isoformat(timespec="seconds"),
+                action,
+                entite,
+                entite_id,
+                detail,
+            ),
+        )
+
+    def enregistrer_action(self, action, entite, entite_id=None, detail=None):
+        self._log_action(action, entite, entite_id, detail)
+        self.conn.commit()
+
+    def get_journal_actions(self, limit=None, action=None, entite=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, date_action, action, entite, entite_id, detail
+            FROM journal_actions
+        '''
+        filters = []
+        params = []
+        if action is not None:
+            filters.append('action = ?')
+            params.append(action)
+        if entite is not None:
+            filters.append('entite = ?')
+            params.append(entite)
+        if filters:
+            query += ' WHERE ' + ' AND '.join(filters)
+        query += ' ORDER BY date_action DESC, id DESC'
+        if limit is not None:
+            query += ' LIMIT ?'
+            params.append(limit)
+        cursor.execute(query, tuple(params))
+        return cursor.fetchall()
+
     def ajouter_bande(
         self, nom_bande, date_debut, nombre_initial, prix_achat=None,
         activite='chair'
@@ -330,8 +398,16 @@ class Database:
             )
             VALUES (?, ?, ?, ?, ?)
         ''', (nom_bande, date_debut, nombre_initial, prix_achat, activite))
+        bande_id = cursor.lastrowid
+        self._log_action(
+            'creation_bande',
+            'bandes',
+            bande_id,
+            f"{nom_bande} ({activite}) - effectif {nombre_initial}",
+            cursor,
+        )
         self.conn.commit()
-        return cursor.lastrowid
+        return bande_id
 
     def modifier_bande(
         self, bande_id, nom_bande, date_debut, nombre_initial, prix_achat=None
@@ -346,6 +422,13 @@ class Database:
             ''',
             (nom_bande, date_debut, nombre_initial, prix_achat, bande_id),
         )
+        self._log_action(
+            'modification_bande',
+            'bandes',
+            bande_id,
+            f"{nom_bande} - effectif {nombre_initial}",
+            cursor,
+        )
         self.conn.commit()
 
     def cloturer_bande(self, bande_id):
@@ -353,6 +436,7 @@ class Database:
         cursor.execute(
             "UPDATE bandes SET statut = 'cloture' WHERE id = ?", (bande_id,)
         )
+        self._log_action('cloture_bande', 'bandes', bande_id, cursor=cursor)
         self.conn.commit()
 
     def ajouter_mortalite(
@@ -363,6 +447,13 @@ class Database:
             INSERT INTO mortalites (bande_id, date, nombre_morts, cause, description)
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, nombre_morts, cause, description))
+        self._log_action(
+            'mortalite',
+            'mortalites',
+            cursor.lastrowid,
+            f"{nombre_morts} morts - {cause or 'cause non renseignee'}",
+            cursor,
+        )
         self.conn.commit()
 
     def get_mortalites(self, bande_id=None):
@@ -385,6 +476,13 @@ class Database:
             INSERT INTO depenses (bande_id, date, type_depense, montant, description, fournisseur)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (bande_id, date, type_depense, montant, description, fournisseur))
+        self._log_action(
+            'depense',
+            'depenses',
+            cursor.lastrowid,
+            f"{type_depense} - {montant:.0f} FCFA",
+            cursor,
+        )
         self.conn.commit()
 
     def get_depenses(self, bande_id=None):
@@ -413,6 +511,13 @@ class Database:
             )
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, quantite_kg, type_aliment, observation))
+        self._log_action(
+            'consommation_aliment',
+            'consommations_aliment',
+            cursor.lastrowid,
+            f"{quantite_kg:g} kg - {type_aliment or 'type non renseigne'}",
+            cursor,
+        )
         self.conn.commit()
 
     def ajouter_pesee(
@@ -429,6 +534,13 @@ class Database:
             )
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, poids_moyen_g, effectif_pese, observation))
+        self._log_action(
+            'pesee',
+            'pesees',
+            cursor.lastrowid,
+            f"{poids_moyen_g:g} g sur {effectif_pese} sujets",
+            cursor,
+        )
         self.conn.commit()
 
     def ajouter_ponte(self, bande_id, date, nombre_oeufs, observation=None):
@@ -439,10 +551,18 @@ class Database:
             INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
             VALUES (?, ?, ?, ?)
         ''', (bande_id, date, nombre_oeufs, observation))
+        ponte_id = cursor.lastrowid
         cursor.execute('''
             INSERT INTO mouvements_oeufs (bande_id, date, type_mouvement, quantite)
             VALUES (?, ?, 'entree_production', ?)
         ''', (bande_id, date, nombre_oeufs))
+        self._log_action(
+            'ponte',
+            'pontes',
+            ponte_id,
+            f"{nombre_oeufs} oeufs produits",
+            cursor,
+        )
         self.conn.commit()
 
     def get_total_oeufs(self, bande_id):
@@ -509,6 +629,13 @@ class Database:
             )
             VALUES (?, ?, 'vente', ?, ?, ?, ?)
         ''', (bande_id, date, quantite, prix_unitaire, montant, client))
+        self._log_action(
+            'vente_oeufs',
+            'mouvements_oeufs',
+            cursor.lastrowid,
+            f"{quantite} oeufs vendus pour {montant:.0f} FCFA",
+            cursor,
+        )
         self.conn.commit()
 
     def get_ventes_oeufs(self, bande_id=None):
@@ -562,6 +689,13 @@ class Database:
             bande_id, date, nombre_poulets, prix_unitaire, montant_total,
             client, paiement, poids_total
         ))
+        self._log_action(
+            'vente_poulets',
+            'ventes',
+            cursor.lastrowid,
+            f"{nombre_poulets} sujets vendus pour {montant_total:.0f} FCFA",
+            cursor,
+        )
         self.conn.commit()
 
     def get_bande_info(self, bande_id):
@@ -748,6 +882,13 @@ class Database:
                 updated_at,
             ),
         )
+        self._log_action(
+            'prevision_lot',
+            'previsions_lot',
+            bande_id,
+            "Previsions du lot mises a jour",
+            cursor,
+        )
         self.conn.commit()
 
     def get_prevision_lot(self, bande_id):
@@ -787,8 +928,16 @@ class Database:
             INSERT INTO stocks (nom_article, categorie, unite, seuil_alerte)
             VALUES (?, ?, ?, ?)
         ''', (nom_article, categorie, unite, seuil_alerte))
+        stock_id = cursor.lastrowid
+        self._log_action(
+            'creation_stock',
+            'stocks',
+            stock_id,
+            f"{nom_article} ({categorie})",
+            cursor,
+        )
         self.conn.commit()
-        return cursor.lastrowid
+        return stock_id
 
     def get_articles_stock(self):
         cursor = self.conn.cursor()
@@ -832,6 +981,13 @@ class Database:
             )
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (stock_id, date, type_mouvement, quantite, bande_id, motif))
+        self._log_action(
+            'mouvement_stock',
+            'mouvements_stock',
+            cursor.lastrowid,
+            f"{type_mouvement} {quantite:g} - stock #{stock_id}",
+            cursor,
+        )
         self.conn.commit()
 
     def get_mouvements_stock(self, stock_id=None, bande_id=None):
@@ -902,12 +1058,20 @@ class Database:
             )
             VALUES (?, ?, 'sortie', ?, ?, ?)
         ''', (stock_id, date, quantite_kg, bande_id, motif))
+        mouvement_id = cursor.lastrowid
         cursor.execute('''
             INSERT INTO consommations_aliment (
                 bande_id, date, quantite_kg, type_aliment, observation
             )
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, quantite_kg, type_aliment, observation))
+        self._log_action(
+            'sortie_stock_aliment',
+            'mouvements_stock',
+            mouvement_id,
+            f"{quantite_kg:g} kg - stock #{stock_id}",
+            cursor,
+        )
         self.conn.commit()
 
     def ajouter_intervention_sanitaire(
@@ -929,6 +1093,13 @@ class Database:
             bande_id, date, type_intervention, produit, dose, intervenant,
             prochaine_echeance
         ))
+        self._log_action(
+            'intervention_sanitaire',
+            'interventions_sanitaires',
+            cursor.lastrowid,
+            f"{type_intervention} - {produit}",
+            cursor,
+        )
         self.conn.commit()
 
     def get_ventes(self, bande_id=None):

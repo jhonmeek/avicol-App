@@ -10,8 +10,9 @@ def test_migration_v7_table_previsions(tmp_path):
             "SELECT name FROM sqlite_master WHERE type='table'"
         )
     }
+    schema_version = db.get_schema_version()
     db.close()
-    assert db.SCHEMA_VERSION == 7
+    assert schema_version == db.SCHEMA_VERSION
     assert "previsions_lot" in tables
 
 

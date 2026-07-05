@@ -1568,6 +1568,27 @@ class ProfessionalMainWindow(QMainWindow):
         ])
         sanitaire_layout.addWidget(self.interventions_table)
 
+        # Onglet Journal
+        journal_tab = QWidget()
+        journal_layout = QVBoxLayout(journal_tab)
+        journal_layout.setContentsMargins(10, 10, 10, 10)
+
+        journal_header = QHBoxLayout()
+        journal_header.addWidget(QLabel("Journal d'audit"))
+        journal_header.addStretch()
+        journal_layout.addLayout(journal_header)
+
+        self.journal_table = QTableWidget()
+        self.journal_table.setColumnCount(5)
+        self.journal_table.setHorizontalHeaderLabels([
+            "Date",
+            "Action",
+            "Entite",
+            "ID",
+            "Detail",
+        ])
+        journal_layout.addWidget(self.journal_table)
+
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
@@ -1576,6 +1597,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.trans_tabs.addTab(oeufs_tab, "Œufs")
         self.trans_tabs.addTab(stocks_tab, "Stocks")
         self.trans_tabs.addTab(sanitaire_tab, "Sanitaire")
+        self.trans_tabs.addTab(journal_tab, "Journal")
         
         layout.addWidget(self.trans_tabs)
         
@@ -2713,6 +2735,22 @@ class ProfessionalMainWindow(QMainWindow):
             else:
                 self.echeances_label.setText("Aucune échéance à venir.")
 
+        if hasattr(self, "journal_table"):
+            rows = self.db.get_journal_actions(limit=500)
+            self.journal_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[1],
+                    row[2],
+                    row[3],
+                    row[4] or "",
+                    row[5] or "",
+                ]
+                for column, value in enumerate(values):
+                    self.journal_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
         self.filter_transactions()
 
     def filter_transactions(self):
@@ -2737,19 +2775,24 @@ class ProfessionalMainWindow(QMainWindow):
             (self.aliment_table, 1),
             (self.pesees_table, 1),
             (self.interventions_table, 1),
+            (self.journal_table, None),
         )
         for table, bande_column in tables:
             for row in range(table.rowCount()):
                 date_item = table.item(row, 0)
-                bande_item = table.item(row, bande_column)
+                bande_item = (
+                    table.item(row, bande_column)
+                    if bande_column is not None else None
+                )
                 row_date = QDate.fromString(
-                    date_item.text() if date_item else "", "yyyy-MM-dd"
+                    (date_item.text() if date_item else "")[:10], "yyyy-MM-dd"
                 )
                 date_matches = cutoff is None or (
                     row_date.isValid() and row_date >= cutoff
                 )
-                bande_matches = not filter_bande or (
-                    bande_item is not None and bande_item.text() == selected_bande
+                bande_matches = bande_column is None or not filter_bande or (
+                    bande_item is not None
+                    and bande_item.text() == selected_bande
                 )
                 table.setRowHidden(row, not (date_matches and bande_matches))
 
@@ -3061,6 +3104,11 @@ class ProfessionalMainWindow(QMainWindow):
         self.db.conn.commit()
         backups_dir = ensure_user_directories()["backups"]
         dest = backup_module.create_backup(self.db.db_name, backups_dir)
+        self.db.enregistrer_action(
+            "sauvegarde",
+            "base",
+            detail=f"Sauvegarde creee : {dest}",
+        )
         self.show_message(
             QMessageBox.Icon.Information,
             "Sauvegarde terminée",
@@ -3085,6 +3133,11 @@ class ProfessionalMainWindow(QMainWindow):
         self.db.close()
         safety = backup_module.restore_backup(path, target, backups_dir)
         self.db = Database(str(target))
+        self.db.enregistrer_action(
+            "restauration",
+            "base",
+            detail=f"Fichier restaure : {path} | sauvegarde securite : {safety}",
+        )
         self.current_bande_id = None
         self.load_bandes()
         self.show_message(
