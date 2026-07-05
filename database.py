@@ -604,5 +604,37 @@ class Database:
         cursor.execute('SELECT * FROM bandes ORDER BY date_debut DESC')
         return cursor.fetchall()
 
+    def ajouter_article_stock(self, nom_article, categorie, unite, seuil_alerte=0):
+        if categorie not in ('aliment', 'medicament', 'litiere'):
+            raise ValueError("Catégorie de stock invalide.")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO stocks (nom_article, categorie, unite, seuil_alerte)
+            VALUES (?, ?, ?, ?)
+        ''', (nom_article, categorie, unite, seuil_alerte))
+        self.conn.commit()
+        return cursor.lastrowid
+
+    def get_articles_stock(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT id, nom_article, categorie, unite, seuil_alerte '
+            'FROM stocks ORDER BY categorie, nom_article'
+        )
+        return cursor.fetchall()
+
+    def get_stock_quantite(self, stock_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT COALESCE(SUM(
+                CASE WHEN type_mouvement = 'entree' THEN quantite ELSE -quantite END
+            ), 0)
+            FROM mouvements_stock WHERE stock_id = ?
+            ''',
+            (stock_id,),
+        )
+        return cursor.fetchone()[0]
+
     def close(self):
         self.conn.close()
