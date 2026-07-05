@@ -8,6 +8,7 @@ class Database:
         self.db_name = str(db_name or database_path())
         self.conn = sqlite3.connect(self.db_name)
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
     
     def create_tables(self):
