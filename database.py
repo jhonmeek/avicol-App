@@ -636,5 +636,42 @@ class Database:
         )
         return cursor.fetchone()[0]
 
+    def ajouter_mouvement_stock(
+        self, stock_id, date, type_mouvement, quantite, bande_id=None, motif=None
+    ):
+        if type_mouvement not in ('entree', 'sortie'):
+            raise ValueError("Type de mouvement invalide.")
+        if quantite <= 0:
+            raise ValueError("La quantité doit être supérieure à zéro.")
+        if type_mouvement == 'sortie':
+            stock_actuel = self.get_stock_quantite(stock_id)
+            if quantite > stock_actuel:
+                raise ValueError(
+                    f"Sortie refusée : {quantite:g} demandé(s) pour "
+                    f"{stock_actuel:g} en stock."
+                )
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO mouvements_stock (
+                stock_id, date, type_mouvement, quantite, bande_id, motif
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', (stock_id, date, type_mouvement, quantite, bande_id, motif))
+        self.conn.commit()
+
+    def get_mouvements_stock(self, stock_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, stock_id, date, type_mouvement, quantite, bande_id, motif
+            FROM mouvements_stock
+        '''
+        params = ()
+        if stock_id is not None:
+            query += ' WHERE stock_id = ?'
+            params = (stock_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
     def close(self):
         self.conn.close()
