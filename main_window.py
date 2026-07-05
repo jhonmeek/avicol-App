@@ -841,9 +841,9 @@ class ProfessionalMainWindow(QMainWindow):
         self.create_analytics_page()
         self.create_reports_page()
         self.create_settings_page()
-        self.configure_data_tables()
         
         main_layout.addWidget(content_widget, 1)
+        self.configure_data_tables()
         
         # Barre de statut
         self.create_statusbar()
@@ -916,7 +916,15 @@ class ProfessionalMainWindow(QMainWindow):
             )
             table.verticalHeader().setVisible(False)
             table.verticalHeader().setDefaultSectionSize(42)
+            table.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding,
+            )
+            if table.maximumHeight() >= 260 and table.minimumHeight() == 0:
+                table.setMinimumHeight(max(table.minimumHeight(), 280))
+            table.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
             table.horizontalHeader().setMinimumHeight(40)
+            table.horizontalHeader().setStretchLastSection(True)
             table.horizontalHeader().setDefaultAlignment(
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
             )
@@ -1199,7 +1207,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.recent_table.setColumnCount(5)
         self.recent_table.setHorizontalHeaderLabels(["Date", "Type", "Description", "Montant", "Statut"])
         self.recent_table.horizontalHeader().setStretchLastSection(True)
-        recent_layout.addWidget(self.recent_table)
+        recent_layout.addWidget(self.recent_table, 1)
         
         layout.addWidget(recent_frame)
         
@@ -1246,6 +1254,11 @@ class ProfessionalMainWindow(QMainWindow):
         
         # Tableau des bandes avec onglets
         tabs = QTabWidget()
+        tabs.setMinimumHeight(520)
+        tabs.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         
         # Onglet Toutes les bandes
         all_bandes_tab = QWidget()
@@ -1267,7 +1280,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.bandes_table.setColumnWidth(8, 220)
         self.bandes_table.verticalHeader().setVisible(False)
         self.bandes_table.verticalHeader().setDefaultSectionSize(52)
-        all_layout.addWidget(self.bandes_table)
+        all_layout.addWidget(self.bandes_table, 1)
         
         # Onglet Statistiques
         stats_tab = QWidget()
@@ -1293,7 +1306,7 @@ class ProfessionalMainWindow(QMainWindow):
         tabs.addTab(all_bandes_tab, "Toutes les bandes")
         tabs.addTab(stats_tab, "Statistiques")
         
-        layout.addWidget(tabs)
+        layout.addWidget(tabs, 1)
         
         self.content_stack.addWidget(page)
     
@@ -1346,6 +1359,11 @@ class ProfessionalMainWindow(QMainWindow):
         # Onglets des transactions
         self.trans_tabs = QTabWidget()
         self.trans_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self.trans_tabs.setMinimumHeight(560)
+        self.trans_tabs.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Expanding,
+        )
         
         # Onglet Mortalités
         mortalites_tab = QWidget()
@@ -1374,7 +1392,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Taux",
             "Actions",
         ])
-        mortalites_layout.addWidget(self.mortalites_table)
+        mortalites_layout.addWidget(self.mortalites_table, 1)
         
         # Onglet Dépenses
         depenses_tab = QWidget()
@@ -1395,7 +1413,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.depenses_table = QTableWidget()
         self.depenses_table.setColumnCount(7)
         self.depenses_table.setHorizontalHeaderLabels(["Date", "Type", "Description", "Montant", "Bande", "Catégorie", "Actions"])
-        depenses_layout.addWidget(self.depenses_table)
+        depenses_layout.addWidget(self.depenses_table, 1)
         
         # Onglet Ventes
         ventes_tab = QWidget()
@@ -1416,7 +1434,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.ventes_table = QTableWidget()
         self.ventes_table.setColumnCount(8)
         self.ventes_table.setHorizontalHeaderLabels(["Date", "Bande", "Nombre", "Prix unitaire", "Total", "Client", "Moyen", "Actions"])
-        ventes_layout.addWidget(self.ventes_table)
+        ventes_layout.addWidget(self.ventes_table, 1)
 
         # Onglet Aliment
         aliment_tab = QWidget()
@@ -1445,7 +1463,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Indicateur",
             "Actions",
         ])
-        aliment_layout.addWidget(self.aliment_table)
+        aliment_layout.addWidget(self.aliment_table, 1)
 
         # Onglet Pesées
         pesees_tab = QWidget()
@@ -1474,7 +1492,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Indicateur",
             "Actions",
         ])
-        pesees_layout.addWidget(self.pesees_table)
+        pesees_layout.addWidget(self.pesees_table, 1)
 
         # Onglet Œufs
         oeufs_tab = QWidget()
@@ -1518,7 +1536,8 @@ class ProfessionalMainWindow(QMainWindow):
             "Observation",
             "Actions",
         ])
-        oeufs_layout.addWidget(self.ponte_table)
+        self.ponte_table.setMinimumHeight(220)
+        oeufs_layout.addWidget(self.ponte_table, 2)
 
         ventes_oeufs_label = QLabel("Ventes d'œufs")
         oeufs_layout.addWidget(ventes_oeufs_label)
@@ -1533,7 +1552,8 @@ class ProfessionalMainWindow(QMainWindow):
             "Total",
             "Client",
         ])
-        oeufs_layout.addWidget(self.ventes_oeufs_table)
+        self.ventes_oeufs_table.setMinimumHeight(190)
+        oeufs_layout.addWidget(self.ventes_oeufs_table, 1)
 
         calibrage_label = QLabel("Calibrage des œufs")
         oeufs_layout.addWidget(calibrage_label)
@@ -1548,7 +1568,8 @@ class ProfessionalMainWindow(QMainWindow):
             "Poids moyen",
             "Observation",
         ])
-        oeufs_layout.addWidget(self.calibrage_oeufs_table)
+        self.calibrage_oeufs_table.setMinimumHeight(190)
+        oeufs_layout.addWidget(self.calibrage_oeufs_table, 1)
 
         # Onglet Stocks
         stocks_tab = QWidget()
@@ -1586,7 +1607,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Seuil d'alerte",
             "Statut",
         ])
-        stocks_layout.addWidget(self.stocks_table)
+        stocks_layout.addWidget(self.stocks_table, 1)
 
         # Onglet Sanitaire
         sanitaire_tab = QWidget()
@@ -1619,7 +1640,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Intervenant",
             "Prochaine échéance",
         ])
-        sanitaire_layout.addWidget(self.interventions_table)
+        sanitaire_layout.addWidget(self.interventions_table, 1)
 
         # Onglet Journal
         journal_tab = QWidget()
@@ -1640,7 +1661,7 @@ class ProfessionalMainWindow(QMainWindow):
             "ID",
             "Detail",
         ])
-        journal_layout.addWidget(self.journal_table)
+        journal_layout.addWidget(self.journal_table, 1)
 
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
@@ -1652,7 +1673,7 @@ class ProfessionalMainWindow(QMainWindow):
         self.trans_tabs.addTab(sanitaire_tab, "Sanitaire")
         self.trans_tabs.addTab(journal_tab, "Journal")
         
-        layout.addWidget(self.trans_tabs)
+        layout.addWidget(self.trans_tabs, 1)
         
         self.content_stack.addWidget(page)
     
