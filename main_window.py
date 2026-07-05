@@ -945,6 +945,9 @@ class ProfessionalMainWindow(QMainWindow):
             lambda: self.show_page("parametres")
         )
         file_menu.addSeparator()
+        cloture_action = file_menu.addAction("Clôturer la bande active")
+        cloture_action.triggered.connect(self.cloturer_bande_active)
+        file_menu.addSeparator()
         quit_action = file_menu.addAction("Quitter")
         quit_action.triggered.connect(self.close)
         
@@ -2698,6 +2701,29 @@ class ProfessionalMainWindow(QMainWindow):
                 "La vente a été ajoutée au journal.",
             )
     
+    def cloturer_bande_active(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+        answer = QMessageBox.question(
+            self,
+            "Clôturer la bande",
+            "Clôturer définitivement cette bande ?",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        self.db.cloturer_bande(self.current_bande_id)
+        self.load_bandes()
+        self.show_message(
+            QMessageBox.Icon.Information,
+            "Bande clôturée",
+            "La bande a été marquée comme clôturée.",
+        )
+
     def closeEvent(self, event):
         """Fermeture de l'application"""
         self.db.close()

@@ -155,6 +155,13 @@ class Database:
         )
         self.conn.commit()
 
+    def cloturer_bande(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "UPDATE bandes SET statut = 'cloture' WHERE id = ?", (bande_id,)
+        )
+        self.conn.commit()
+
     def ajouter_mortalite(
         self, bande_id, date, nombre_morts, cause=None, description=None
     ):
