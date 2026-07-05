@@ -221,12 +221,17 @@ class Database:
             "ON pesees (bande_id, date)"
         )
 
-    def ajouter_bande(self, nom_bande, date_debut, nombre_initial, prix_achat=None):
+    def ajouter_bande(
+        self, nom_bande, date_debut, nombre_initial, prix_achat=None,
+        activite='chair'
+    ):
         cursor = self.conn.cursor()
         cursor.execute('''
-            INSERT INTO bandes (nom_bande, date_debut, nombre_initial, prix_achat_poussin)
-            VALUES (?, ?, ?, ?)
-        ''', (nom_bande, date_debut, nombre_initial, prix_achat))
+            INSERT INTO bandes (
+                nom_bande, date_debut, nombre_initial, prix_achat_poussin, activite
+            )
+            VALUES (?, ?, ?, ?, ?)
+        ''', (nom_bande, date_debut, nombre_initial, prix_achat, activite))
         self.conn.commit()
         return cursor.lastrowid
 
