@@ -149,6 +149,44 @@ class Database:
         # Colonne d'activite (chair/ponte) sur les lots existants.
         self._ensure_column("bandes", "activite", "TEXT DEFAULT 'chair'")
 
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pontes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                nombre_oeufs INTEGER NOT NULL CHECK (nombre_oeufs > 0),
+                observation TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mouvements_oeufs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                type_mouvement TEXT NOT NULL
+                    CHECK (type_mouvement IN ('entree_production', 'vente')),
+                quantite INTEGER NOT NULL CHECK (quantite > 0),
+                prix_unitaire REAL,
+                montant REAL,
+                client TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        self._create_ponte_indexes()
+
+    def _create_ponte_indexes(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pontes_bande_date "
+            "ON pontes (bande_id, date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mouvements_oeufs_bande_date "
+            "ON mouvements_oeufs (bande_id, date)"
+        )
+
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
         columns = {
