@@ -12,6 +12,7 @@ import csv
 import shutil
 
 import backup as backup_module
+import indicators
 from app_paths import ensure_user_directories
 from database import Database
 from theme_avicole import AvicoleThemeManager
@@ -1912,13 +1913,13 @@ class ProfessionalMainWindow(QMainWindow):
             restants = self.db.get_poulets_restants(self.current_bande_id) or 0
             total_vendus = self.db.get_total_vendus(self.current_bande_id) or 0
             
-            # Calculs
+            # Calculs (source unique : indicators.py)
             nombre_initial = bande_info[3]
-            taux_mortalite = (total_morts / nombre_initial * 100) if nombre_initial > 0 else 0
-            benefice = total_ventes - total_couts
-            prix_moyen = total_ventes / total_vendus if total_vendus > 0 else 0
-            efficacite = (total_vendus / nombre_initial * 100) if nombre_initial > 0 else 0
-            roi = (benefice / total_couts * 100) if total_couts > 0 else 0
+            taux_mortalite = indicators.taux_mortalite(total_morts, nombre_initial)
+            benefice = indicators.benefice(total_ventes, total_couts)
+            prix_moyen = indicators.prix_moyen(total_ventes, total_vendus)
+            efficacite = indicators.efficacite(total_vendus, nombre_initial)
+            roi = indicators.roi(benefice, total_couts)
             
             # Mettre à jour les cartes
             if hasattr(self, 'cards'):
