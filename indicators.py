@@ -12,7 +12,6 @@ def poulets_restants(initial, morts, vendus):
 def taux_mortalite(morts, initial):
     return (morts / initial * 100) if initial > 0 else 0.0
 
-
 def taux_viabilite(morts, initial):
     return (100.0 - taux_mortalite(morts, initial)) if initial > 0 else 0.0
 
