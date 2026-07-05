@@ -1,5 +1,6 @@
 # database.py
 import sqlite3
+from datetime import datetime
 
 from app_paths import database_path
 
@@ -10,10 +11,43 @@ class Database:
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
-    
+
+    SCHEMA_VERSION = 1
+
     def create_tables(self):
+        """Applique les migrations en attente (idempotent)."""
         cursor = self.conn.cursor()
-        
+        cursor.execute(
+            "CREATE TABLE IF NOT EXISTS schema_version ("
+            "version INTEGER NOT NULL, applied_at TEXT NOT NULL)"
+        )
+        current = self.get_schema_version()
+        for version in range(current + 1, self.SCHEMA_VERSION + 1):
+            self._apply_migration(version)
+            cursor.execute(
+                "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
+                (version, datetime.now().isoformat(timespec="seconds")),
+            )
+        self.conn.commit()
+
+    def get_schema_version(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type='table' AND name='schema_version'"
+        )
+        if cursor.fetchone() is None:
+            return 0
+        row = cursor.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        return row[0] if row and row[0] is not None else 0
+
+    def _apply_migration(self, version):
+        if version == 1:
+            self._migration_1_baseline()
+
+    def _migration_1_baseline(self):
+        cursor = self.conn.cursor()
+
         # Table pour les bandes de poulets
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS bandes (
@@ -25,7 +59,7 @@ class Database:
                 statut TEXT DEFAULT 'en_cours'
             )
         ''')
-        
+
         # Table pour les mortalités
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS mortalites (
@@ -38,7 +72,7 @@ class Database:
                 FOREIGN KEY (bande_id) REFERENCES bandes(id)
             )
         ''')
-        
+
         # Table pour les dépenses
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS depenses (
@@ -52,7 +86,7 @@ class Database:
                 FOREIGN KEY (bande_id) REFERENCES bandes(id)
             )
         ''')
-        
+
         # Table pour les ventes/recettes
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS ventes (
@@ -73,7 +107,6 @@ class Database:
         self._ensure_column("ventes", "client", "TEXT")
         self._ensure_column("ventes", "paiement", "TEXT")
         self._create_indexes()
-        self.conn.commit()
 
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
@@ -97,7 +130,7 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_ventes_bande_date "
             "ON ventes (bande_id, date)"
         )
-    
+
     def ajouter_bande(self, nom_bande, date_debut, nombre_initial, prix_achat=None):
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -121,7 +154,7 @@ class Database:
             (nom_bande, date_debut, nombre_initial, prix_achat, bande_id),
         )
         self.conn.commit()
-    
+
     def ajouter_mortalite(
         self, bande_id, date, nombre_morts, cause=None, description=None
     ):
@@ -131,7 +164,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?)
         ''', (bande_id, date, nombre_morts, cause, description))
         self.conn.commit()
-    
+
     def ajouter_depense(self, bande_id, date, type_depense, montant, description=None, fournisseur=None):
         cursor = self.conn.cursor()
         cursor.execute('''
@@ -139,7 +172,7 @@ class Database:
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (bande_id, date, type_depense, montant, description, fournisseur))
         self.conn.commit()
-    
+
     def ajouter_vente(
         self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
         paiement=None
@@ -157,18 +190,18 @@ class Database:
             client, paiement
         ))
         self.conn.commit()
-    
+
     def get_bande_info(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM bandes WHERE id = ?', (bande_id,))
         return cursor.fetchone()
-    
+
     def get_total_mortalites(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(nombre_morts) FROM mortalites WHERE bande_id = ?', (bande_id,))
         result = cursor.fetchone()[0]
         return result if result else 0
-    
+
     def get_total_depenses(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(montant) FROM depenses WHERE bande_id = ?', (bande_id,))
@@ -185,13 +218,13 @@ class Database:
 
     def get_total_couts(self, bande_id):
         return self.get_cout_initial(bande_id) + self.get_total_depenses(bande_id)
-    
+
     def get_total_ventes(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(montant_total) FROM ventes WHERE bande_id = ?', (bande_id,))
         result = cursor.fetchone()[0]
         return result if result else 0
-    
+
     def get_poulets_restants(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT nombre_initial FROM bandes WHERE id = ?', (bande_id,))
@@ -202,17 +235,17 @@ class Database:
         total_morts = self.get_total_mortalites(bande_id)
         total_vendus = self.get_total_vendus(bande_id)
         return initial - total_morts - total_vendus
-    
+
     def get_total_vendus(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(nombre_poulets) FROM ventes WHERE bande_id = ?', (bande_id,))
         result = cursor.fetchone()[0]
         return result if result else 0
-    
+
     def get_bandes(self):
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM bandes ORDER BY date_debut DESC')
         return cursor.fetchall()
-    
+
     def close(self):
         self.conn.close()
