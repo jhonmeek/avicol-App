@@ -660,6 +660,8 @@ def previsionnel_reel_text(rapport):
 
 
 def build_synthese_direction(db, date_reference=None):
+    import alerts
+
     date_reference = date_reference or today_iso()
     lots = [_lot_metrics(db, bande) for bande in db.get_bandes()]
     lots = sorted(lots, key=lambda row: (row["activite"], row["nom"], row["id"]))
@@ -708,6 +710,9 @@ def build_synthese_direction(db, date_reference=None):
         "lots": lots,
         "rentabilite": rentabilite,
         "previsionnel": build_previsionnel_reel(db),
+        "alertes_operationnelles": alerts.build_alertes_operationnelles(
+            db, date_reference
+        ),
         "alertes_stock": alertes_stock,
         "echeances_sanitaires": echeances,
     }
@@ -799,6 +804,17 @@ def synthese_direction_text(synthese):
                 f"ecart {_format_money(totaux['resultat']['ecart'])}"
             ),
         ])
+
+    alertes_operationnelles = synthese.get("alertes_operationnelles", [])
+    lines.extend(["", "ALERTES OPERATIONNELLES", "-" * 58])
+    if not alertes_operationnelles:
+        lines.append("Aucune alerte operationnelle.")
+    for alerte in alertes_operationnelles[:10]:
+        lot = f" - {alerte['bande_nom']}" if alerte["bande_nom"] else ""
+        lines.append(
+            f"[{alerte['niveau'].upper()}] {alerte['titre']}{lot} : "
+            f"{alerte['detail']}"
+        )
 
     lines.extend(["", "ALERTES STOCK", "-" * 58])
     if not synthese["alertes_stock"]:

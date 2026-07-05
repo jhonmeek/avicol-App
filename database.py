@@ -1184,5 +1184,10 @@ class Database:
 
         return reporting.build_previsionnel_reel(self)
 
+    def get_alertes_operationnelles(self, date_reference=None):
+        import alerts
+
+        return alerts.build_alertes_operationnelles(self, date_reference)
+
     def close(self):
         self.conn.close()

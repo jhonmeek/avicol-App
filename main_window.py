@@ -12,6 +12,7 @@ import csv
 import shutil
 
 import backup as backup_module
+import alerts
 import indicators
 import reporting
 from app_paths import ensure_user_directories
@@ -1091,6 +1092,38 @@ class ProfessionalMainWindow(QMainWindow):
             cards_grid.addWidget(card, row, col)
         
         layout.addLayout(cards_grid)
+
+        # Alertes operationnelles
+        alertes_frame = QFrame()
+        alertes_frame.setObjectName("sectionContainer")
+        alertes_layout = QVBoxLayout(alertes_frame)
+        alertes_layout.setContentsMargins(16, 14, 16, 14)
+        alertes_layout.setSpacing(10)
+
+        alertes_header = QHBoxLayout()
+        alertes_title = QLabel("Alertes opérationnelles")
+        alertes_title.setObjectName("subtitle")
+        alertes_header.addWidget(alertes_title)
+        alertes_header.addStretch()
+        self.alertes_summary_label = QLabel("Aucune alerte critique.")
+        self.alertes_summary_label.setObjectName("summary")
+        alertes_header.addWidget(self.alertes_summary_label)
+        alertes_layout.addLayout(alertes_header)
+
+        self.alertes_table = QTableWidget()
+        self.alertes_table.setColumnCount(4)
+        self.alertes_table.setHorizontalHeaderLabels([
+            "Niveau",
+            "Type",
+            "Alerte",
+            "Détail",
+        ])
+        self.alertes_table.setMaximumHeight(180)
+        self.alertes_table.verticalHeader().setVisible(False)
+        self.alertes_table.horizontalHeader().setStretchLastSection(True)
+        alertes_layout.addWidget(self.alertes_table)
+
+        layout.addWidget(alertes_frame)
         
         # Graphiques en grille 2x2
         charts_container = QWidget()
@@ -1747,6 +1780,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Synthèse direction",
             "Fiche lot AGASA",
             "Prévisionnel vs réel",
+            "Alertes opérationnelles",
         ])
         self.report_type_combo = report_type
         options_layout.addWidget(QLabel("Type de rapport:"), 0, 0)
@@ -2168,8 +2202,42 @@ class ProfessionalMainWindow(QMainWindow):
             "gmq": gmq,
         }
     
+    def update_alertes_panel(self):
+        if not hasattr(self, "alertes_table"):
+            return
+        alertes = self.db.get_alertes_operationnelles()
+        critiques = sum(1 for alerte in alertes if alerte["niveau"] == "critique")
+        warnings = sum(1 for alerte in alertes if alerte["niveau"] == "warning")
+        if alertes:
+            self.alertes_summary_label.setText(
+                f"{critiques} critique(s), {warnings} à surveiller"
+            )
+        else:
+            self.alertes_summary_label.setText("Aucune alerte critique.")
+
+        self.alertes_table.setRowCount(len(alertes))
+        colors = {
+            "critique": QColor("#FEE4E2"),
+            "warning": QColor("#FEF0C7"),
+            "info": QColor("#E0F2FE"),
+        }
+        for row_index, alerte in enumerate(alertes):
+            values = [
+                alerte["niveau"].capitalize(),
+                alerte["type"],
+                alerte["titre"],
+                alerte["detail"],
+            ]
+            for column, value in enumerate(values):
+                item = QTableWidgetItem(str(value))
+                color = colors.get(alerte["niveau"])
+                if color:
+                    item.setBackground(color)
+                self.alertes_table.setItem(row_index, column, item)
+
     def update_dashboard(self):
         """Mettre à jour le dashboard"""
+        self.update_alertes_panel()
         if not self.current_bande_id:
             return
         
@@ -2922,6 +2990,11 @@ class ProfessionalMainWindow(QMainWindow):
                 reporting.previsionnel_reel_text(rapport)
             )
             return
+        if report_type == "Alertes opérationnelles":
+            self.report_preview.setPlainText(
+                alerts.alertes_text(self.db.get_alertes_operationnelles())
+            )
+            return
         if report_type == "Fiche lot AGASA":
             if not self.current_bande_id:
                 self.show_message(
@@ -3008,7 +3081,10 @@ class ProfessionalMainWindow(QMainWindow):
         if not path.lower().endswith(f".{extension}"):
             path += f".{extension}"
         if csv_format and report_type in (
-            "Synthèse direction", "Fiche lot AGASA", "Prévisionnel vs réel"
+            "Synthèse direction",
+            "Fiche lot AGASA",
+            "Prévisionnel vs réel",
+            "Alertes opérationnelles",
         ):
             if report_type == "Synthèse direction":
                 rows = reporting.synthese_direction_csv_rows(
@@ -3017,6 +3093,10 @@ class ProfessionalMainWindow(QMainWindow):
             elif report_type == "Prévisionnel vs réel":
                 rows = reporting.previsionnel_reel_csv_rows(
                     self.db.get_previsionnel_reel()
+                )
+            elif report_type == "Alertes opérationnelles":
+                rows = alerts.alertes_csv_rows(
+                    self.db.get_alertes_operationnelles()
                 )
             else:
                 rows = reporting.fiche_lot_agasa_csv_rows(
