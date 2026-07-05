@@ -1045,7 +1045,9 @@ class ProfessionalMainWindow(QMainWindow):
             ("Nouvelle bande", self.nouvelle_bande, "success"),
             ("Déclarer une mortalité", self.ajouter_mortalite, "primary"),
             ("Enregistrer une dépense", self.ajouter_depense, "warning"),
-            ("Enregistrer une vente", self.ajouter_vente, "info")
+            ("Enregistrer une vente", self.ajouter_vente, "info"),
+            ("Saisir aliment", self.ajouter_aliment, "secondary"),
+            ("Nouvelle pesée", self.ajouter_pesee, "secondary"),
         ]
         
         for index, (text, callback, style) in enumerate(buttons):
@@ -1073,6 +1075,8 @@ class ProfessionalMainWindow(QMainWindow):
             ("Recettes cumulées", "recettes", "#18794E"),
             ("Résultat net", "benefice", "#6941C6"),
             ("Retour sur investissement", "roi", "#175CD3"),
+            ("Indice de consommation", "ic", "#1E6B57"),
+            ("GMQ", "gmq", "#0077B6"),
             ("Efficacité de production", "efficacite", "#1E6B57"),
             ("Revenu par sujet", "rentabilite", "#7A5C00")
         ]
@@ -1112,8 +1116,8 @@ class ProfessionalMainWindow(QMainWindow):
         self.chart_mortality = AnalyticsChart("Tendance des mortalités", "line")
         charts_grid.addWidget(self.chart_mortality, 1, 0)
         
-        # Graphique 4: Comparaison bandes
-        self.chart_comparison = AnalyticsChart("Comparaison des bandes", "bar")
+        # Graphique 4: Croissance
+        self.chart_comparison = AnalyticsChart("Croissance poids moyen", "line")
         charts_grid.addWidget(self.chart_comparison, 1, 1)
         self.dashboard_chart_widgets = [
             self.chart_sales,
@@ -1379,10 +1383,70 @@ class ProfessionalMainWindow(QMainWindow):
         self.ventes_table.setColumnCount(8)
         self.ventes_table.setHorizontalHeaderLabels(["Date", "Bande", "Nombre", "Prix unitaire", "Total", "Client", "Moyen", "Actions"])
         ventes_layout.addWidget(self.ventes_table)
+
+        # Onglet Aliment
+        aliment_tab = QWidget()
+        aliment_layout = QVBoxLayout(aliment_tab)
+        aliment_layout.setContentsMargins(10, 10, 10, 10)
+
+        aliment_header = QHBoxLayout()
+        aliment_header.addWidget(QLabel("Aliment distribué"))
+        aliment_header.addStretch()
+
+        add_aliment_btn = QPushButton("Ajouter")
+        add_aliment_btn.setStyleSheet(self.theme_manager.get_button_style("primary", "small"))
+        add_aliment_btn.clicked.connect(self.ajouter_aliment)
+        aliment_header.addWidget(add_aliment_btn)
+
+        aliment_layout.addLayout(aliment_header)
+
+        self.aliment_table = QTableWidget()
+        self.aliment_table.setColumnCount(7)
+        self.aliment_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Quantité",
+            "Type",
+            "Observation",
+            "Indicateur",
+            "Actions",
+        ])
+        aliment_layout.addWidget(self.aliment_table)
+
+        # Onglet Pesées
+        pesees_tab = QWidget()
+        pesees_layout = QVBoxLayout(pesees_tab)
+        pesees_layout.setContentsMargins(10, 10, 10, 10)
+
+        pesees_header = QHBoxLayout()
+        pesees_header.addWidget(QLabel("Pesées de croissance"))
+        pesees_header.addStretch()
+
+        add_pesee_btn = QPushButton("Ajouter")
+        add_pesee_btn.setStyleSheet(self.theme_manager.get_button_style("primary", "small"))
+        add_pesee_btn.clicked.connect(self.ajouter_pesee)
+        pesees_header.addWidget(add_pesee_btn)
+
+        pesees_layout.addLayout(pesees_header)
+
+        self.pesees_table = QTableWidget()
+        self.pesees_table.setColumnCount(7)
+        self.pesees_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Poids moyen",
+            "Effectif pesé",
+            "Observation",
+            "Indicateur",
+            "Actions",
+        ])
+        pesees_layout.addWidget(self.pesees_table)
         
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
+        self.trans_tabs.addTab(aliment_tab, "Aliment")
+        self.trans_tabs.addTab(pesees_tab, "Pesées")
         
         layout.addWidget(self.trans_tabs)
         
@@ -1893,6 +1957,43 @@ class ProfessionalMainWindow(QMainWindow):
             if bande_id:
                 self.current_bande_id = bande_id
                 self.update_dashboard()
+
+    @staticmethod
+    def _days_between(date_debut, date_fin):
+        try:
+            debut = datetime.strptime(str(date_debut), "%Y-%m-%d")
+            fin = datetime.strptime(str(date_fin), "%Y-%m-%d")
+        except (TypeError, ValueError):
+            return 0
+        return (fin - debut).days
+
+    def _zootechnie_metrics_for_bande(self, bande_info):
+        bande_id = bande_info[0]
+        restants = self.db.get_poulets_restants(bande_id) or 0
+        total_aliment_kg = self.db.get_total_aliment_kg(bande_id) or 0
+        latest_pesee = self.db.get_latest_pesee(bande_id)
+        first_pesee = self.db.get_first_pesee(bande_id)
+        poids_moyen_g = latest_pesee[3] if latest_pesee else 0
+        poids_vif_kg = indicators.poids_vif_estime_kg(restants, poids_moyen_g)
+        ic = indicators.indice_consommation(total_aliment_kg, poids_vif_kg)
+        gmq = 0.0
+        if latest_pesee:
+            if first_pesee and first_pesee[0] != latest_pesee[0]:
+                jours = self._days_between(first_pesee[2], latest_pesee[2])
+                poids_initial_g = first_pesee[3]
+            else:
+                jours = self._days_between(bande_info[2], latest_pesee[2])
+                poids_initial_g = 0
+            gmq = indicators.gain_moyen_quotidien(
+                poids_initial_g, latest_pesee[3], jours
+            )
+        return {
+            "total_aliment_kg": total_aliment_kg,
+            "poids_moyen_g": poids_moyen_g,
+            "poids_vif_kg": poids_vif_kg,
+            "ic": ic,
+            "gmq": gmq,
+        }
     
     def update_dashboard(self):
         """Mettre à jour le dashboard"""
@@ -1912,6 +2013,7 @@ class ProfessionalMainWindow(QMainWindow):
             total_ventes = self.db.get_total_ventes(self.current_bande_id) or 0
             restants = self.db.get_poulets_restants(self.current_bande_id) or 0
             total_vendus = self.db.get_total_vendus(self.current_bande_id) or 0
+            zootech = self._zootechnie_metrics_for_bande(bande_info)
             
             # Calculs (source unique : indicators.py)
             nombre_initial = bande_info[3]
@@ -1920,6 +2022,11 @@ class ProfessionalMainWindow(QMainWindow):
             prix_moyen = indicators.prix_moyen(total_ventes, total_vendus)
             efficacite = indicators.efficacite(total_vendus, nombre_initial)
             roi = indicators.roi(benefice, total_couts)
+            total_aliment_kg = zootech["total_aliment_kg"]
+            poids_moyen_g = zootech["poids_moyen_g"]
+            poids_vif_kg = zootech["poids_vif_kg"]
+            ic = zootech["ic"]
+            gmq = zootech["gmq"]
             
             # Mettre à jour les cartes
             if hasattr(self, 'cards'):
@@ -1955,6 +2062,24 @@ class ProfessionalMainWindow(QMainWindow):
                 self.cards['roi'].update_value(
                     f"{roi:.1f}%",
                     "Retour sur investissement"
+                )
+
+                self.cards['ic'].update_value(
+                    f"{ic:.2f}" if ic else "—",
+                    (
+                        f"{total_aliment_kg:,.1f} kg aliment / "
+                        f"{poids_vif_kg:,.1f} kg vif"
+                    ) if poids_vif_kg else "Pesée requise pour calculer l'IC",
+                    "Calculé" if ic else "À compléter",
+                    "success" if ic else "warning",
+                )
+
+                self.cards['gmq'].update_value(
+                    f"{gmq:.1f} g/j" if gmq else "—",
+                    f"Dernier poids moyen : {poids_moyen_g:,.0f} g"
+                    if poids_moyen_g else "Pesée requise",
+                    "Calculé" if gmq else "À compléter",
+                    "success" if gmq else "warning",
                 )
                 
                 self.cards['efficacite'].update_value(
@@ -2031,15 +2156,11 @@ class ProfessionalMainWindow(QMainWindow):
                 self.chart_mortality.update_chart(valeurs, dates)
 
             if hasattr(self, "chart_comparison"):
-                bandes = self.db.get_bandes()[:8]
-                labels = [row[1] for row in bandes]
-                results = [
-                    self.db.get_total_ventes(row[0])
-                    - self.db.get_total_depenses(row[0])
-                    for row in bandes
-                ]
+                pesees = list(reversed(self.db.get_pesees(self.current_bande_id)))[:10]
+                labels = [row[2][5:] for row in pesees]
+                results = [row[3] for row in pesees]
                 self.chart_comparison.update_chart(
-                    results or [0], labels or ["Aucune bande"]
+                    results or [0], labels or ["Aucune pesée"]
                 )
         
         except Exception as e:
@@ -2071,9 +2192,27 @@ class ProfessionalMainWindow(QMainWindow):
                        montant_total, '' as info
                 FROM ventes 
                 WHERE bande_id = ?
+                UNION ALL
+                SELECT 'ALI' as icon, date, 'Aliment' as type,
+                       quantite_kg || ' kg distribues' as description,
+                       NULL as montant, COALESCE(type_aliment, '') as info
+                FROM consommations_aliment
+                WHERE bande_id = ?
+                UNION ALL
+                SELECT 'PES' as icon, date, 'Pesee' as type,
+                       poids_moyen_g || ' g moyen' as description,
+                       NULL as montant, effectif_pese || ' sujets peses' as info
+                FROM pesees
+                WHERE bande_id = ?
                 ORDER BY date DESC
                 LIMIT 10
-            ''', (self.current_bande_id, self.current_bande_id, self.current_bande_id))
+            ''', (
+                self.current_bande_id,
+                self.current_bande_id,
+                self.current_bande_id,
+                self.current_bande_id,
+                self.current_bande_id,
+            ))
             
             transactions = cursor.fetchall()
             
@@ -2227,6 +2366,58 @@ class ProfessionalMainWindow(QMainWindow):
                     self.ventes_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+
+        if hasattr(self, "aliment_table"):
+            rows = cursor.execute(
+                """
+                SELECT a.date, b.nom_bande, a.quantite_kg, a.type_aliment,
+                       a.observation
+                FROM consommations_aliment a
+                LEFT JOIN bandes b ON b.id = a.bande_id
+                ORDER BY a.date DESC, a.id DESC
+                """
+            ).fetchall()
+            self.aliment_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[0],
+                    row[1] or "",
+                    f"{row[2]:,.2f} kg",
+                    row[3] or "",
+                    row[4] or "",
+                    "IC",
+                    "",
+                ]
+                for column, value in enumerate(values):
+                    self.aliment_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+
+        if hasattr(self, "pesees_table"):
+            rows = cursor.execute(
+                """
+                SELECT p.date, b.nom_bande, p.poids_moyen_g, p.effectif_pese,
+                       p.observation
+                FROM pesees p
+                LEFT JOIN bandes b ON b.id = p.bande_id
+                ORDER BY p.date DESC, p.id DESC
+                """
+            ).fetchall()
+            self.pesees_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[0],
+                    row[1] or "",
+                    f"{row[2]:,.0f} g",
+                    row[3],
+                    row[4] or "",
+                    "GMQ",
+                    "",
+                ]
+                for column, value in enumerate(values):
+                    self.pesees_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
         self.filter_transactions()
 
     def filter_transactions(self):
@@ -2248,6 +2439,8 @@ class ProfessionalMainWindow(QMainWindow):
             (self.mortalites_table, 1),
             (self.depenses_table, 4),
             (self.ventes_table, 1),
+            (self.aliment_table, 1),
+            (self.pesees_table, 1),
         )
         for table, bande_column in tables:
             for row in range(table.rowCount()):
@@ -2336,6 +2529,8 @@ class ProfessionalMainWindow(QMainWindow):
         total_couts = total_depenses + cout_initial
         total_ventes = sum(self.db.get_total_ventes(row[0]) for row in bandes)
         total_morts = sum(self.db.get_total_mortalites(row[0]) for row in bandes)
+        total_aliment = sum(self.db.get_total_aliment_kg(row[0]) for row in bandes)
+        bandes_avec_pesee = sum(1 for row in bandes if self.db.get_latest_pesee(row[0]))
         report = (
             f"AVICOLE PRO\n{report_type.upper()}\n"
             f"Édité le {datetime.now():%d/%m/%Y à %H:%M}\n"
@@ -2348,6 +2543,8 @@ class ProfessionalMainWindow(QMainWindow):
             f"Coût total : {total_couts:,.0f} FCFA\n"
             f"Recettes cumulées : {total_ventes:,.0f} FCFA\n"
             f"Résultat net : {total_ventes - total_couts:,.0f} FCFA\n"
+            f"Aliment distribué : {total_aliment:,.1f} kg\n"
+            f"Bandes avec pesée : {bandes_avec_pesee}\n"
         )
         self.report_preview.setPlainText(report)
 
@@ -2381,10 +2578,15 @@ class ProfessionalMainWindow(QMainWindow):
                         "Dépenses",
                         "Coût total",
                         "Recettes",
+                        "Aliment kg",
+                        "Dernier poids g",
+                        "IC",
+                        "GMQ g/j",
                     ]
                 )
                 for bande in bandes:
                     cout_total = self.db.get_total_couts(bande[0])
+                    zootech = self._zootechnie_metrics_for_bande(bande)
                     writer.writerow([
                         bande[1],
                         bande[3],
@@ -2392,6 +2594,10 @@ class ProfessionalMainWindow(QMainWindow):
                         self.db.get_total_depenses(bande[0]),
                         cout_total,
                         self.db.get_total_ventes(bande[0]),
+                        round(zootech["total_aliment_kg"], 2),
+                        round(zootech["poids_moyen_g"], 0),
+                        round(zootech["ic"], 2),
+                        round(zootech["gmq"], 2),
                     ])
         else:
             Path(path).write_text(
@@ -2651,6 +2857,80 @@ class ProfessionalMainWindow(QMainWindow):
                 "La dépense a été ajoutée au journal.",
             )
     
+    def ajouter_aliment(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        from dialogs import SaisieAlimentDialog
+
+        dialog = SaisieAlimentDialog(self.current_bande_id, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_consommation_aliment(
+                    self.current_bande_id,
+                    data["date"],
+                    data["quantite_kg"],
+                    data["type_aliment"],
+                    data["observation"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Aliment enregistré",
+                "La consommation d'aliment a été ajoutée au suivi.",
+            )
+
+    def ajouter_pesee(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        from dialogs import SaisiePeseeDialog
+
+        dialog = SaisiePeseeDialog(self.current_bande_id, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_pesee(
+                    self.current_bande_id,
+                    data["date"],
+                    data["poids_moyen_g"],
+                    data["effectif_pese"],
+                    data["observation"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Pesée enregistrée",
+                "La pesée a été ajoutée au suivi de croissance.",
+            )
+
     def ajouter_vente(self):
         if not self.current_bande_id:
             self.show_message(

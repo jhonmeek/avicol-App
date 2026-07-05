@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -44,6 +44,8 @@ class Database:
     def _apply_migration(self, version):
         if version == 1:
             self._migration_1_baseline()
+        elif version == 2:
+            self._migration_2_zootechnie_chair()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -108,6 +110,32 @@ class Database:
         self._ensure_column("ventes", "paiement", "TEXT")
         self._create_indexes()
 
+    def _migration_2_zootechnie_chair(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS consommations_aliment (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                quantite_kg REAL NOT NULL CHECK (quantite_kg > 0),
+                type_aliment TEXT,
+                observation TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS pesees (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                poids_moyen_g REAL NOT NULL CHECK (poids_moyen_g > 0),
+                effectif_pese INTEGER NOT NULL CHECK (effectif_pese > 0),
+                observation TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        self._create_zootechnie_indexes()
+
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
         columns = {
@@ -129,6 +157,17 @@ class Database:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_ventes_bande_date "
             "ON ventes (bande_id, date)"
+        )
+
+    def _create_zootechnie_indexes(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_consommations_aliment_bande_date "
+            "ON consommations_aliment (bande_id, date)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pesees_bande_date "
+            "ON pesees (bande_id, date)"
         )
 
     def ajouter_bande(self, nom_bande, date_debut, nombre_initial, prix_achat=None):
@@ -178,6 +217,36 @@ class Database:
             INSERT INTO depenses (bande_id, date, type_depense, montant, description, fournisseur)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', (bande_id, date, type_depense, montant, description, fournisseur))
+        self.conn.commit()
+
+    def ajouter_consommation_aliment(
+        self, bande_id, date, quantite_kg, type_aliment=None, observation=None
+    ):
+        if quantite_kg <= 0:
+            raise ValueError("La quantite d'aliment doit etre superieure a zero.")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO consommations_aliment (
+                bande_id, date, quantite_kg, type_aliment, observation
+            )
+            VALUES (?, ?, ?, ?, ?)
+        ''', (bande_id, date, quantite_kg, type_aliment, observation))
+        self.conn.commit()
+
+    def ajouter_pesee(
+        self, bande_id, date, poids_moyen_g, effectif_pese, observation=None
+    ):
+        if poids_moyen_g <= 0:
+            raise ValueError("Le poids moyen doit etre superieur a zero.")
+        if effectif_pese <= 0:
+            raise ValueError("L'effectif pese doit etre superieur a zero.")
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO pesees (
+                bande_id, date, poids_moyen_g, effectif_pese, observation
+            )
+            VALUES (?, ?, ?, ?, ?)
+        ''', (bande_id, date, poids_moyen_g, effectif_pese, observation))
         self.conn.commit()
 
     def ajouter_vente(
@@ -254,6 +323,71 @@ class Database:
         cursor.execute('SELECT SUM(nombre_poulets) FROM ventes WHERE bande_id = ?', (bande_id,))
         result = cursor.fetchone()[0]
         return result if result else 0
+
+    def get_total_aliment_kg(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT SUM(quantite_kg) FROM consommations_aliment WHERE bande_id = ?',
+            (bande_id,),
+        )
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def get_consommations_aliment(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, quantite_kg, type_aliment, observation
+            FROM consommations_aliment
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_pesees(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, poids_moyen_g, effectif_pese, observation
+            FROM pesees
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_latest_pesee(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT id, bande_id, date, poids_moyen_g, effectif_pese, observation
+            FROM pesees
+            WHERE bande_id = ?
+            ORDER BY date DESC, id DESC
+            LIMIT 1
+            ''',
+            (bande_id,),
+        )
+        return cursor.fetchone()
+
+    def get_first_pesee(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT id, bande_id, date, poids_moyen_g, effectif_pese, observation
+            FROM pesees
+            WHERE bande_id = ?
+            ORDER BY date ASC, id ASC
+            LIMIT 1
+            ''',
+            (bande_id,),
+        )
+        return cursor.fetchone()
 
     def get_bandes(self):
         cursor = self.conn.cursor()
