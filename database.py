@@ -350,6 +350,68 @@ class Database:
         cursor.execute(query, params)
         return cursor.fetchall()
 
+    def get_stock_oeufs(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT COALESCE(SUM(
+                CASE WHEN type_mouvement = 'entree_production'
+                     THEN quantite ELSE -quantite END
+            ), 0)
+            FROM mouvements_oeufs WHERE bande_id = ?
+            ''',
+            (bande_id,),
+        )
+        return cursor.fetchone()[0]
+
+    def ajouter_vente_oeufs(
+        self, bande_id, date, quantite, prix_unitaire, client=None
+    ):
+        if quantite <= 0:
+            raise ValueError("La quantite vendue doit etre superieure a zero.")
+        stock = self.get_stock_oeufs(bande_id)
+        if quantite > stock:
+            raise ValueError(
+                f"Vente refusée : {quantite} œufs demandés pour {stock} en stock."
+            )
+        montant = quantite * prix_unitaire
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            INSERT INTO mouvements_oeufs (
+                bande_id, date, type_mouvement, quantite, prix_unitaire,
+                montant, client
+            )
+            VALUES (?, ?, 'vente', ?, ?, ?, ?)
+        ''', (bande_id, date, quantite, prix_unitaire, montant, client))
+        self.conn.commit()
+
+    def get_ventes_oeufs(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, quantite, prix_unitaire, montant, client
+            FROM mouvements_oeufs
+            WHERE type_mouvement = 'vente'
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' AND bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_total_ventes_oeufs(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT SUM(montant) FROM mouvements_oeufs
+            WHERE bande_id = ? AND type_mouvement = 'vente'
+            ''',
+            (bande_id,),
+        )
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
     def ajouter_vente(
         self, bande_id, date, nombre_poulets, prix_unitaire, client=None,
         paiement=None, poids_total=None

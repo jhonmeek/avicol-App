@@ -77,3 +77,43 @@ def test_ajouter_ponte_refuse_valeur_invalide(tmp_path):
     with pytest.raises(ValueError):
         db.ajouter_ponte(bande_id, "2026-03-01", 0)
     db.close()
+
+
+def test_stock_oeufs_ac3(tmp_path):
+    db = Database(db_name=tmp_path / "stock_ac3.db")
+    bande_id = _bande_ponte(db)
+
+    db.ajouter_ponte(bande_id, "2026-03-01", 600)
+    db.ajouter_ponte(bande_id, "2026-03-02", 600)
+    db.ajouter_ponte(bande_id, "2026-03-03", 600)  # total 1800
+
+    db.ajouter_vente_oeufs(bande_id, "2026-03-04", 1200, 100)
+
+    stock = db.get_stock_oeufs(bande_id)
+    db.close()
+    assert stock == 600  # AC-3 : 1800 pondus, 1200 vendus -> stock 600
+
+
+def test_vente_oeufs_refusee_si_stock_insuffisant(tmp_path):
+    db = Database(db_name=tmp_path / "stock_guard.db")
+    bande_id = _bande_ponte(db)
+    db.ajouter_ponte(bande_id, "2026-03-01", 100)
+    with pytest.raises(ValueError):
+        db.ajouter_vente_oeufs(bande_id, "2026-03-02", 150, 100)
+    db.close()
+
+
+def test_get_ventes_oeufs_et_total(tmp_path):
+    db = Database(db_name=tmp_path / "ventes_oeufs.db")
+    bande_id = _bande_ponte(db)
+    db.ajouter_ponte(bande_id, "2026-03-01", 500)
+    db.ajouter_vente_oeufs(bande_id, "2026-03-02", 300, 120, client="Marche central")
+
+    total_ventes = db.get_total_ventes_oeufs(bande_id)
+    rows = db.get_ventes_oeufs(bande_id)
+    db.close()
+    assert total_ventes == 36000
+    assert rows[0][3] == 300  # quantite
+    assert rows[0][4] == 120  # prix_unitaire
+    assert rows[0][5] == 36000  # montant
+    assert rows[0][6] == "Marche central"  # client
