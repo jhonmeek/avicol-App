@@ -139,6 +139,108 @@ def _lot_metrics(db, bande):
     }
 
 
+def _percent_gap(reel, prevu):
+    return ((reel - prevu) / prevu * 100) if prevu else 0.0
+
+
+def _empty_prevision(bande_id):
+    return {
+        "id": None,
+        "bande_id": bande_id,
+        "cout_poussins_prevu": 0,
+        "cout_aliment_prevu": 0,
+        "cout_sanitaire_prevu": 0,
+        "autres_charges_prevues": 0,
+        "quantite_vendue_prevue": 0,
+        "prix_vente_unitaire_prevu": 0,
+        "oeufs_prevus": 0,
+        "prix_oeuf_prevu": 0,
+        "note": "",
+        "updated_at": "",
+    }
+
+
+def _prevision_dict(row, bande_id):
+    if not row:
+        return _empty_prevision(bande_id)
+    return {
+        "id": row[0],
+        "bande_id": row[1],
+        "cout_poussins_prevu": row[2] or 0,
+        "cout_aliment_prevu": row[3] or 0,
+        "cout_sanitaire_prevu": row[4] or 0,
+        "autres_charges_prevues": row[5] or 0,
+        "quantite_vendue_prevue": row[6] or 0,
+        "prix_vente_unitaire_prevu": row[7] or 0,
+        "oeufs_prevus": row[8] or 0,
+        "prix_oeuf_prevu": row[9] or 0,
+        "note": row[10] or "",
+        "updated_at": row[11] or "",
+    }
+
+
+def _previsionnel_lot(db, bande):
+    lot = _lot_metrics(db, bande)
+    prevision = _prevision_dict(db.get_prevision_lot(bande[0]), bande[0])
+    couts_prevus = (
+        prevision["cout_poussins_prevu"]
+        + prevision["cout_aliment_prevu"]
+        + prevision["cout_sanitaire_prevu"]
+        + prevision["autres_charges_prevues"]
+    )
+    if lot["activite"] == "ponte":
+        recettes_prevues = (
+            prevision["oeufs_prevus"] * prevision["prix_oeuf_prevu"]
+        )
+    else:
+        recettes_prevues = (
+            prevision["quantite_vendue_prevue"]
+            * prevision["prix_vente_unitaire_prevu"]
+        )
+    resultat_prevu = recettes_prevues - couts_prevus
+    reel = {
+        "recettes": lot["recettes_activite"],
+        "couts": lot["couts"],
+        "resultat": lot["resultat"],
+    }
+    prevu = {
+        "recettes": recettes_prevues,
+        "couts": couts_prevus,
+        "resultat": resultat_prevu,
+        "cout_poussins": prevision["cout_poussins_prevu"],
+        "cout_aliment": prevision["cout_aliment_prevu"],
+        "cout_sanitaire": prevision["cout_sanitaire_prevu"],
+        "autres_charges": prevision["autres_charges_prevues"],
+        "quantite_vendue": prevision["quantite_vendue_prevue"],
+        "prix_vente_unitaire": prevision["prix_vente_unitaire_prevu"],
+        "oeufs": prevision["oeufs_prevus"],
+        "prix_oeuf": prevision["prix_oeuf_prevu"],
+        "note": prevision["note"],
+    }
+    return {
+        "lot": {
+            "id": lot["id"],
+            "nom": lot["nom"],
+            "activite": lot["activite"],
+            "date_debut": lot["date_debut"],
+        },
+        "prevision": prevu,
+        "reel": reel,
+        "ecarts": {
+            "recettes": reel["recettes"] - prevu["recettes"],
+            "recettes_pct": _percent_gap(
+                reel["recettes"], prevu["recettes"]
+            ),
+            "couts": reel["couts"] - prevu["couts"],
+            "couts_pct": _percent_gap(reel["couts"], prevu["couts"]),
+            "resultat": reel["resultat"] - prevu["resultat"],
+            "resultat_pct": _percent_gap(
+                reel["resultat"], prevu["resultat"]
+            ),
+        },
+    }
+
+
 def _event(date, type_, detail, quantite="", montant="", reference="", order=50):
     return {
         "date": date or "",
@@ -425,6 +527,138 @@ def fiche_lot_agasa_text(fiche):
     return "\n".join(lines)
 
 
+def _totaux_previsionnel(lots):
+    totaux = {
+        "recettes": {"prevu": 0, "reel": 0, "ecart": 0, "ecart_pct": 0},
+        "couts": {"prevu": 0, "reel": 0, "ecart": 0, "ecart_pct": 0},
+        "resultat": {"prevu": 0, "reel": 0, "ecart": 0, "ecart_pct": 0},
+    }
+    for lot in lots:
+        for key in ("recettes", "couts", "resultat"):
+            totaux[key]["prevu"] += lot["prevision"][key]
+            totaux[key]["reel"] += lot["reel"][key]
+    for key, bloc in totaux.items():
+        bloc["ecart"] = bloc["reel"] - bloc["prevu"]
+        bloc["ecart_pct"] = _percent_gap(bloc["reel"], bloc["prevu"])
+    return totaux
+
+
+def build_previsionnel_reel(db):
+    lots = [_previsionnel_lot(db, bande) for bande in db.get_bandes()]
+    lots = sorted(
+        lots,
+        key=lambda row: (row["lot"]["activite"], row["lot"]["nom"], row["lot"]["id"]),
+    )
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "lots": lots,
+        "totaux": _totaux_previsionnel(lots),
+    }
+
+
+def previsionnel_reel_csv_rows(rapport):
+    rows = [[
+        "Lot",
+        "Activite",
+        "Recettes prevues",
+        "Recettes reelles",
+        "Ecart recettes",
+        "Ecart recettes %",
+        "Couts prevus",
+        "Couts reels",
+        "Ecart couts",
+        "Ecart couts %",
+        "Resultat prevu",
+        "Resultat reel",
+        "Ecart resultat",
+        "Ecart resultat %",
+    ]]
+    for row in rapport["lots"]:
+        rows.append([
+            row["lot"]["nom"],
+            row["lot"]["activite"],
+            _csv_number(row["prevision"]["recettes"]),
+            _csv_number(row["reel"]["recettes"]),
+            _csv_number(row["ecarts"]["recettes"]),
+            _csv_number(row["ecarts"]["recettes_pct"]),
+            _csv_number(row["prevision"]["couts"]),
+            _csv_number(row["reel"]["couts"]),
+            _csv_number(row["ecarts"]["couts"]),
+            _csv_number(row["ecarts"]["couts_pct"]),
+            _csv_number(row["prevision"]["resultat"]),
+            _csv_number(row["reel"]["resultat"]),
+            _csv_number(row["ecarts"]["resultat"]),
+            _csv_number(row["ecarts"]["resultat_pct"]),
+        ])
+    return rows
+
+
+def previsionnel_reel_text(rapport):
+    totaux = rapport["totaux"]
+    lines = [
+        "AVICOLE PRO",
+        "PREVISIONNEL VS REEL",
+        f"Edite le {datetime.now():%d/%m/%Y a %H:%M}",
+        "=" * 58,
+        "",
+        "SYNTHESE",
+        "-" * 58,
+        (
+            "Recettes : "
+            f"prevu {_format_money(totaux['recettes']['prevu'])}, "
+            f"reel {_format_money(totaux['recettes']['reel'])}, "
+            f"ecart {_format_money(totaux['recettes']['ecart'])} "
+            f"({_format_percent(totaux['recettes']['ecart_pct'])})"
+        ),
+        (
+            "Couts : "
+            f"prevu {_format_money(totaux['couts']['prevu'])}, "
+            f"reel {_format_money(totaux['couts']['reel'])}, "
+            f"ecart {_format_money(totaux['couts']['ecart'])} "
+            f"({_format_percent(totaux['couts']['ecart_pct'])})"
+        ),
+        (
+            "Resultat : "
+            f"prevu {_format_money(totaux['resultat']['prevu'])}, "
+            f"reel {_format_money(totaux['resultat']['reel'])}, "
+            f"ecart {_format_money(totaux['resultat']['ecart'])} "
+            f"({_format_percent(totaux['resultat']['ecart_pct'])})"
+        ),
+        "",
+        "DETAIL PAR LOT",
+        "-" * 58,
+    ]
+    if not rapport["lots"]:
+        lines.append("Aucun lot enregistre.")
+    for row in rapport["lots"]:
+        lot = row["lot"]
+        prevision = row["prevision"]
+        reel = row["reel"]
+        ecarts = row["ecarts"]
+        lines.extend([
+            f"{lot['nom']} ({lot['activite']})",
+            (
+                f"  Recettes : prevu {_format_money(prevision['recettes'])}, "
+                f"reel {_format_money(reel['recettes'])}, "
+                f"ecart {_format_money(ecarts['recettes'])} "
+                f"({_format_percent(ecarts['recettes_pct'])})"
+            ),
+            (
+                f"  Couts    : prevu {_format_money(prevision['couts'])}, "
+                f"reel {_format_money(reel['couts'])}, "
+                f"ecart {_format_money(ecarts['couts'])} "
+                f"({_format_percent(ecarts['couts_pct'])})"
+            ),
+            (
+                f"  Resultat : prevu {_format_money(prevision['resultat'])}, "
+                f"reel {_format_money(reel['resultat'])}, "
+                f"ecart {_format_money(ecarts['resultat'])} "
+                f"({_format_percent(ecarts['resultat_pct'])})"
+            ),
+        ])
+    return "\n".join(lines)
+
+
 def build_synthese_direction(db, date_reference=None):
     date_reference = date_reference or today_iso()
     lots = [_lot_metrics(db, bande) for bande in db.get_bandes()]
@@ -473,6 +707,7 @@ def build_synthese_direction(db, date_reference=None):
         "date_reference": date_reference,
         "lots": lots,
         "rentabilite": rentabilite,
+        "previsionnel": build_previsionnel_reel(db),
         "alertes_stock": alertes_stock,
         "echeances_sanitaires": echeances,
     }
@@ -539,6 +774,31 @@ def synthese_direction_text(synthese):
             f"IC {lot['ic']:.2f}, GMQ {lot['gmq']:.2f} g/j, "
             f"Taux ponte {lot['taux_ponte']:.2f}%"
         )
+
+    previsionnel = synthese.get("previsionnel")
+    if previsionnel:
+        totaux = previsionnel["totaux"]
+        lines.extend(["", "PREVISIONNEL VS REEL", "-" * 58])
+        lines.extend([
+            (
+                "Recettes : "
+                f"prevu {_format_money(totaux['recettes']['prevu'])}, "
+                f"reel {_format_money(totaux['recettes']['reel'])}, "
+                f"ecart {_format_money(totaux['recettes']['ecart'])}"
+            ),
+            (
+                "Couts : "
+                f"prevu {_format_money(totaux['couts']['prevu'])}, "
+                f"reel {_format_money(totaux['couts']['reel'])}, "
+                f"ecart {_format_money(totaux['couts']['ecart'])}"
+            ),
+            (
+                "Resultat : "
+                f"prevu {_format_money(totaux['resultat']['prevu'])}, "
+                f"reel {_format_money(totaux['resultat']['reel'])}, "
+                f"ecart {_format_money(totaux['resultat']['ecart'])}"
+            ),
+        ])
 
     lines.extend(["", "ALERTES STOCK", "-" * 58])
     if not synthese["alertes_stock"]:

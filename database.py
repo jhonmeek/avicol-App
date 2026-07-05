@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -54,6 +54,8 @@ class Database:
             self._migration_5_stocks()
         elif version == 6:
             self._migration_6_sanitaire()
+        elif version == 7:
+            self._migration_7_previsions()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -249,6 +251,38 @@ class Database:
         cursor.execute(
             "CREATE INDEX IF NOT EXISTS idx_interventions_echeance "
             "ON interventions_sanitaires (prochaine_echeance)"
+        )
+
+    def _migration_7_previsions(self):
+        cursor = self.conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS previsions_lot (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL UNIQUE,
+                cout_poussins_prevu REAL NOT NULL DEFAULT 0
+                    CHECK (cout_poussins_prevu >= 0),
+                cout_aliment_prevu REAL NOT NULL DEFAULT 0
+                    CHECK (cout_aliment_prevu >= 0),
+                cout_sanitaire_prevu REAL NOT NULL DEFAULT 0
+                    CHECK (cout_sanitaire_prevu >= 0),
+                autres_charges_prevues REAL NOT NULL DEFAULT 0
+                    CHECK (autres_charges_prevues >= 0),
+                quantite_vendue_prevue REAL NOT NULL DEFAULT 0
+                    CHECK (quantite_vendue_prevue >= 0),
+                prix_vente_unitaire_prevu REAL NOT NULL DEFAULT 0
+                    CHECK (prix_vente_unitaire_prevu >= 0),
+                oeufs_prevus INTEGER NOT NULL DEFAULT 0
+                    CHECK (oeufs_prevus >= 0),
+                prix_oeuf_prevu REAL NOT NULL DEFAULT 0
+                    CHECK (prix_oeuf_prevu >= 0),
+                note TEXT,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id) ON DELETE CASCADE
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_previsions_lot_bande "
+            "ON previsions_lot (bande_id)"
         )
 
     def _ensure_column(self, table, column, definition):
@@ -659,6 +693,92 @@ class Database:
         cursor.execute('SELECT * FROM bandes ORDER BY date_debut DESC')
         return cursor.fetchall()
 
+    def enregistrer_prevision_lot(
+        self, bande_id, cout_poussins_prevu=0, cout_aliment_prevu=0,
+        cout_sanitaire_prevu=0, autres_charges_prevues=0,
+        quantite_vendue_prevue=0, prix_vente_unitaire_prevu=0,
+        oeufs_prevus=0, prix_oeuf_prevu=0, note=None
+    ):
+        values = {
+            'cout_poussins_prevu': cout_poussins_prevu,
+            'cout_aliment_prevu': cout_aliment_prevu,
+            'cout_sanitaire_prevu': cout_sanitaire_prevu,
+            'autres_charges_prevues': autres_charges_prevues,
+            'quantite_vendue_prevue': quantite_vendue_prevue,
+            'prix_vente_unitaire_prevu': prix_vente_unitaire_prevu,
+            'oeufs_prevus': oeufs_prevus,
+            'prix_oeuf_prevu': prix_oeuf_prevu,
+        }
+        if any((value or 0) < 0 for value in values.values()):
+            raise ValueError("Les previsions ne peuvent pas etre negatives.")
+        updated_at = datetime.now().isoformat(timespec="seconds")
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO previsions_lot (
+                bande_id, cout_poussins_prevu, cout_aliment_prevu,
+                cout_sanitaire_prevu, autres_charges_prevues,
+                quantite_vendue_prevue, prix_vente_unitaire_prevu,
+                oeufs_prevus, prix_oeuf_prevu, note, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(bande_id) DO UPDATE SET
+                cout_poussins_prevu = excluded.cout_poussins_prevu,
+                cout_aliment_prevu = excluded.cout_aliment_prevu,
+                cout_sanitaire_prevu = excluded.cout_sanitaire_prevu,
+                autres_charges_prevues = excluded.autres_charges_prevues,
+                quantite_vendue_prevue = excluded.quantite_vendue_prevue,
+                prix_vente_unitaire_prevu = excluded.prix_vente_unitaire_prevu,
+                oeufs_prevus = excluded.oeufs_prevus,
+                prix_oeuf_prevu = excluded.prix_oeuf_prevu,
+                note = excluded.note,
+                updated_at = excluded.updated_at
+            ''',
+            (
+                bande_id,
+                cout_poussins_prevu or 0,
+                cout_aliment_prevu or 0,
+                cout_sanitaire_prevu or 0,
+                autres_charges_prevues or 0,
+                quantite_vendue_prevue or 0,
+                prix_vente_unitaire_prevu or 0,
+                int(oeufs_prevus or 0),
+                prix_oeuf_prevu or 0,
+                note,
+                updated_at,
+            ),
+        )
+        self.conn.commit()
+
+    def get_prevision_lot(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT id, bande_id, cout_poussins_prevu, cout_aliment_prevu,
+                   cout_sanitaire_prevu, autres_charges_prevues,
+                   quantite_vendue_prevue, prix_vente_unitaire_prevu,
+                   oeufs_prevus, prix_oeuf_prevu, note, updated_at
+            FROM previsions_lot
+            WHERE bande_id = ?
+            ''',
+            (bande_id,),
+        )
+        return cursor.fetchone()
+
+    def get_previsions_lots(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT id, bande_id, cout_poussins_prevu, cout_aliment_prevu,
+                   cout_sanitaire_prevu, autres_charges_prevues,
+                   quantite_vendue_prevue, prix_vente_unitaire_prevu,
+                   oeufs_prevus, prix_oeuf_prevu, note, updated_at
+            FROM previsions_lot
+            ORDER BY bande_id ASC
+            '''
+        )
+        return cursor.fetchall()
+
     def ajouter_article_stock(self, nom_article, categorie, unite, seuil_alerte=0):
         if categorie not in ('aliment', 'medicament', 'litiere'):
             raise ValueError("Catégorie de stock invalide.")
@@ -887,6 +1007,11 @@ class Database:
         import reporting
 
         return reporting.build_synthese_direction(self, date_reference)
+
+    def get_previsionnel_reel(self):
+        import reporting
+
+        return reporting.build_previsionnel_reel(self)
 
     def close(self):
         self.conn.close()

@@ -1724,6 +1724,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Rapport complet",
             "Synthèse direction",
             "Fiche lot AGASA",
+            "Prévisionnel vs réel",
         ])
         self.report_type_combo = report_type
         options_layout.addWidget(QLabel("Type de rapport:"), 0, 0)
@@ -1746,6 +1747,11 @@ class ProfessionalMainWindow(QMainWindow):
         export_btn.setStyleSheet(self.theme_manager.get_button_style("primary"))
         export_btn.clicked.connect(self.export_report)
         options_layout.addWidget(export_btn, 1, 2)
+
+        prevision_btn = QPushButton("Prévisions du lot")
+        prevision_btn.setStyleSheet(self.theme_manager.get_button_style("primary"))
+        prevision_btn.clicked.connect(self.gerer_prevision_lot)
+        options_layout.addWidget(prevision_btn, 0, 3)
         options_layout.setColumnStretch(1, 1)
         
         layout.addWidget(options)
@@ -2814,12 +2820,63 @@ class ProfessionalMainWindow(QMainWindow):
             QMessageBox.Icon.Information, "Export terminé", f"Fichier créé :\n{path}"
         )
 
+    def gerer_prevision_lot(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Selectionnez d'abord une bande active.",
+            )
+            return
+
+        from dialogs import PrevisionLotDialog
+
+        prevision = self.db.get_prevision_lot(self.current_bande_id)
+        dialog = PrevisionLotDialog(self.current_bande_id, prevision, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.enregistrer_prevision_lot(
+                    self.current_bande_id,
+                    data["cout_poussins_prevu"],
+                    data["cout_aliment_prevu"],
+                    data["cout_sanitaire_prevu"],
+                    data["autres_charges_prevues"],
+                    data["quantite_vendue_prevue"],
+                    data["prix_vente_unitaire_prevu"],
+                    data["oeufs_prevus"],
+                    data["prix_oeuf_prevu"],
+                    data["note"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Saisie impossible",
+                    str(erreur),
+                )
+                return
+            if self.report_type_combo.currentText() in (
+                "Synthèse direction", "Prévisionnel vs réel"
+            ):
+                self.generate_report()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Previsions enregistrees",
+                "Les previsions du lot ont ete mises a jour.",
+            )
+
     def generate_report(self):
         report_type = self.report_type_combo.currentText()
         if report_type == "Synthèse direction":
             synthese = self.db.get_synthese_direction()
             self.report_preview.setPlainText(
                 reporting.synthese_direction_text(synthese)
+            )
+            return
+        if report_type == "Prévisionnel vs réel":
+            rapport = self.db.get_previsionnel_reel()
+            self.report_preview.setPlainText(
+                reporting.previsionnel_reel_text(rapport)
             )
             return
         if report_type == "Fiche lot AGASA":
@@ -2907,10 +2964,16 @@ class ProfessionalMainWindow(QMainWindow):
             return
         if not path.lower().endswith(f".{extension}"):
             path += f".{extension}"
-        if csv_format and report_type in ("Synthèse direction", "Fiche lot AGASA"):
+        if csv_format and report_type in (
+            "Synthèse direction", "Fiche lot AGASA", "Prévisionnel vs réel"
+        ):
             if report_type == "Synthèse direction":
                 rows = reporting.synthese_direction_csv_rows(
                     self.db.get_synthese_direction()
+                )
+            elif report_type == "Prévisionnel vs réel":
+                rows = reporting.previsionnel_reel_csv_rows(
+                    self.db.get_previsionnel_reel()
                 )
             else:
                 rows = reporting.fiche_lot_agasa_csv_rows(

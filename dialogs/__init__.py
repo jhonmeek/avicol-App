@@ -10,6 +10,7 @@ from .vente_oeufs_dialog import NouvelleVenteOeufsDialog
 from .article_stock_dialog import SaisieArticleStockDialog
 from .mouvement_stock_dialog import MouvementStockDialog
 from .intervention_dialog import SaisieInterventionDialog
+from .prevision_dialog import PrevisionLotDialog
 
 __all__ = [
     'NouvelleBandeDialog',
@@ -23,4 +24,5 @@ __all__ = [
     'SaisieArticleStockDialog',
     'MouvementStockDialog',
     'SaisieInterventionDialog',
+    'PrevisionLotDialog',
 ]
