@@ -23,9 +23,13 @@ installer/
 *.rar
 *.zip
 
+docs/
+
 # Editors and operating systems
 .idea/
 .claude/
 .vscode/
 .DS_Store
 Thumbs.db
+docs/superpowers/plans/2026-07-06-phase2-saisie-quotidienne.md
+docs/etude-de-cas-gabon.md

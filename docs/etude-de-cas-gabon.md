@@ -2,7 +2,7 @@
 
 *Document de démonstration — chiffres indicatifs basés sur les ordres de grandeur
 du marché gabonais en 2026. Toutes les fonctionnalités citées existent dans
-l'application (V1, schéma 9) ; les apports de la Phase 2 sont signalés.*
+l'application (schéma 9, Phase 2 « saisie quotidienne » incluse).*
 
 ---
 
@@ -72,8 +72,12 @@ Chaque soir, l'ouvrier enregistre la journée : morts éventuels (avec cause),
 aliment distribué. La sortie d'aliment se fait depuis le module **Stocks** :
 une seule saisie décrémente le stock **et** alimente le suivi de consommation
 du lot — pas de double travail, pas d'écart entre le magasin et le suivi
-technique. *(En Phase 2, l'écran « Saisie du jour » regroupe morts + aliment +
-œufs en un seul formulaire.)*
+technique. Pour le reste du quotidien, le bouton **« Saisie du jour »** du
+tableau de bord regroupe morts + aliment + œufs en un seul formulaire (2 à
+3 minutes chaque soir), avec un avertissement si la journée a déjà été saisie
+— fini les doublons du cahier. Et en cas d'erreur de frappe (25 morts au lieu
+de 5), la ligne se **supprime** d'un clic, l'opération restant tracée dans le
+journal.
 
 À J7, première **pesée** : 170 g de moyenne sur 20 sujets pesés.
 
@@ -163,8 +167,10 @@ ponte d'environ 78 % affiché automatiquement), puis au fil de la semaine :
   charges fixes entre deux cycles chair. Décision prise : passer à 300
   pondeuses au prochain renouvellement.
 
-*(Phase 2 : l'alerte « saisie quotidienne manquante » signalera tout lot sans
-saisie depuis 2 jours — utile quand l'ouvrier est seul à la ferme.)*
+Et quand M. Ondo s'absente à Libreville, l'alerte **« saisie quotidienne
+manquante »** signale tout lot sans saisie depuis 2 jours (critique au-delà
+de 6) : il voit immédiatement au retour si l'ouvrier a tenu le rythme —
+et donc si les indicateurs de la semaine sont fiables.
 
 ---
 
@@ -198,6 +204,8 @@ contre une panne du PC — réflexe pris après chaque clôture de lot.
 | Aliment gaspillé invisible dans un cahier | IC calculé en continu, alerte > 2,2 | ~60 000 FCFA de dérive détectables par lot |
 | Écarts entre poulailler réel et « papier » | Gardes : vente/sortie > disponible refusée | Stock théorique = stock réel |
 | « Le lot a-t-il rapporté ? » au feeling | Bénéfice, ROI, marge par lot + prévisionnel vs réel | Décisions chiffrées (passage à 300 pondeuses) |
+| Erreur de frappe qui fausse tout le bilan | Suppression tracée au journal, gardes d'intégrité | Correction en un clic, historique conservé |
+| Saisies oubliées quand le patron s'absente | Alerte « saisie manquante » après 2 jours + saisie groupée du soir | Régularité contrôlée, indicateurs fiables |
 | Pas de dossier pour l'AGASA ni la banque | Fiche lot AGASA + synthèse direction exportables | Formalisation et accès au crédit |
 
 **Le point clé pour une V1** : tout repose sur une saisie quotidienne de
@@ -214,6 +222,7 @@ mains de l'utilisateur.
   susceptibles de varier selon la saison, la zone (Libreville / intérieur) et
   le fournisseur ; l'application enregistre les prix réels saisis, l'étude ne
   fait que les illustrer.
-- Le scénario suppose la discipline de saisie quotidienne — c'est précisément
-  la friction que la Phase 2 (écran « Saisie du jour », alerte de saisie
-  manquante, correction des erreurs) vise à réduire.
+- Le scénario suppose la discipline de saisie quotidienne — friction réduite
+  par l'écran « Saisie du jour » (une saisie groupée par soir) et surveillée
+  par l'alerte de saisie manquante ; les erreurs restent corrigeables par
+  suppression tracée.
