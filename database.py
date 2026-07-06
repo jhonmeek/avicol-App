@@ -899,6 +899,235 @@ class Database:
         cursor.execute(query, params)
         return cursor.fetchall()
 
+    def _supprimer_enregistrement(self, table, record_id, action, libelle):
+        """Suppression generique tracee dans le journal d'actions."""
+        cursor = self.conn.cursor()
+        row = cursor.execute(
+            f"SELECT id FROM {table} WHERE id = ?", (record_id,)
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"{libelle} introuvable (id={record_id}).")
+        try:
+            cursor.execute(f"DELETE FROM {table} WHERE id = ?", (record_id,))
+            self._log_action(
+                action, table, record_id, f"{libelle} supprime(e)", cursor
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def supprimer_mortalite(self, mortalite_id):
+        self._supprimer_enregistrement(
+            "mortalites", mortalite_id, "suppression_mortalite", "Mortalite"
+        )
+
+    def supprimer_depense(self, depense_id):
+        self._supprimer_enregistrement(
+            "depenses", depense_id, "suppression_depense", "Depense"
+        )
+
+    def supprimer_vente(self, vente_id):
+        self._supprimer_enregistrement(
+            "ventes", vente_id, "suppression_vente", "Vente"
+        )
+
+    def supprimer_consommation_aliment(self, consommation_id):
+        self._supprimer_enregistrement(
+            "consommations_aliment", consommation_id,
+            "suppression_consommation_aliment", "Consommation d'aliment"
+        )
+
+    def supprimer_pesee(self, pesee_id):
+        self._supprimer_enregistrement(
+            "pesees", pesee_id, "suppression_pesee", "Pesee"
+        )
+
+    def supprimer_ponte(self, ponte_id):
+        cursor = self.conn.cursor()
+        row = cursor.execute(
+            "SELECT bande_id, date, nombre_oeufs FROM pontes WHERE id = ?",
+            (ponte_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Ponte introuvable (id={ponte_id}).")
+        bande_id, date_ponte, nombre_oeufs = row
+        if self.get_stock_oeufs(bande_id) - nombre_oeufs < 0:
+            raise ValueError(
+                "Suppression refusee : des oeufs de cette production "
+                "ont deja ete vendus."
+            )
+        production_restante = self.get_total_oeufs(bande_id) - nombre_oeufs
+        if self.get_total_oeufs_calibres(bande_id) > production_restante:
+            raise ValueError(
+                "Suppression refusee : la production restante serait "
+                "inferieure aux oeufs deja calibres."
+            )
+        try:
+            cursor.execute("DELETE FROM pontes WHERE id = ?", (ponte_id,))
+            cursor.execute(
+                '''
+                DELETE FROM mouvements_oeufs WHERE id = (
+                    SELECT id FROM mouvements_oeufs
+                    WHERE bande_id = ? AND date = ?
+                          AND type_mouvement = 'entree_production'
+                          AND quantite = ?
+                    ORDER BY id DESC
+                    LIMIT 1
+                )
+                ''',
+                (bande_id, date_ponte, nombre_oeufs),
+            )
+            self._log_action(
+                "suppression_ponte",
+                "pontes",
+                ponte_id,
+                f"{nombre_oeufs} oeufs annules",
+                cursor,
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def supprimer_vente_oeufs(self, mouvement_id):
+        cursor = self.conn.cursor()
+        row = cursor.execute(
+            "SELECT quantite, montant FROM mouvements_oeufs "
+            "WHERE id = ? AND type_mouvement = 'vente'",
+            (mouvement_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Vente d'oeufs introuvable (id={mouvement_id}).")
+        try:
+            cursor.execute(
+                "DELETE FROM mouvements_oeufs WHERE id = ?", (mouvement_id,)
+            )
+            self._log_action(
+                "suppression_vente_oeufs",
+                "mouvements_oeufs",
+                mouvement_id,
+                f"vente de {row[0]} oeufs annulee ({row[1]:.0f} FCFA)",
+                cursor,
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
+    def get_derniere_date_saisie(self, bande_id):
+        """Date ISO de la saisie la plus recente du lot, ou None."""
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            SELECT MAX(d) FROM (
+                SELECT MAX(date) AS d FROM mortalites WHERE bande_id = :b
+                UNION ALL
+                SELECT MAX(date) FROM consommations_aliment WHERE bande_id = :b
+                UNION ALL
+                SELECT MAX(date) FROM pesees WHERE bande_id = :b
+                UNION ALL
+                SELECT MAX(date) FROM pontes WHERE bande_id = :b
+                UNION ALL
+                SELECT MAX(date) FROM ventes WHERE bande_id = :b
+                UNION ALL
+                SELECT MAX(date) FROM depenses WHERE bande_id = :b
+            )
+            ''',
+            {"b": bande_id},
+        )
+        return cursor.fetchone()[0]
+
+    def compter_saisies_du_jour(self, bande_id, date):
+        """Nombre de saisies deja enregistrees ce jour-la, par famille."""
+        cursor = self.conn.cursor()
+        resultat = {}
+        for cle, table in (
+            ("mortalites", "mortalites"),
+            ("aliment", "consommations_aliment"),
+            ("pontes", "pontes"),
+        ):
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {table} WHERE bande_id = ? AND date = ?",
+                (bande_id, date),
+            )
+            resultat[cle] = cursor.fetchone()[0]
+        return resultat
+
+    def enregistrer_saisie_journaliere(
+        self, bande_id, date, morts=None, cause=None,
+        aliment_kg=None, type_aliment=None, oeufs=None, observation=None
+    ):
+        """Enregistre mortalite, aliment et oeufs en une transaction."""
+        if not any((morts, aliment_kg, oeufs)):
+            raise ValueError(
+                "Renseignez au moins une valeur (morts, aliment ou oeufs)."
+            )
+        if morts:
+            restants = self.get_poulets_restants(bande_id)
+            if morts < 0 or morts > restants:
+                raise ValueError(
+                    f"Mortalite invalide : {restants} sujets disponibles."
+                )
+        if aliment_kg is not None and aliment_kg <= 0:
+            raise ValueError(
+                "La quantite d'aliment doit etre superieure a zero."
+            )
+        if oeufs is not None and oeufs <= 0:
+            raise ValueError("Le nombre d'oeufs doit etre superieur a zero.")
+
+        cursor = self.conn.cursor()
+        try:
+            if morts:
+                cursor.execute(
+                    '''
+                    INSERT INTO mortalites (
+                        bande_id, date, nombre_morts, cause, description
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ''',
+                    (bande_id, date, morts, cause, observation),
+                )
+            if aliment_kg:
+                cursor.execute(
+                    '''
+                    INSERT INTO consommations_aliment (
+                        bande_id, date, quantite_kg, type_aliment, observation
+                    )
+                    VALUES (?, ?, ?, ?, ?)
+                    ''',
+                    (bande_id, date, aliment_kg, type_aliment, observation),
+                )
+            if oeufs:
+                cursor.execute(
+                    '''
+                    INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
+                    VALUES (?, ?, ?, ?)
+                    ''',
+                    (bande_id, date, oeufs, observation),
+                )
+                cursor.execute(
+                    '''
+                    INSERT INTO mouvements_oeufs (
+                        bande_id, date, type_mouvement, quantite
+                    )
+                    VALUES (?, ?, 'entree_production', ?)
+                    ''',
+                    (bande_id, date, oeufs),
+                )
+            self._log_action(
+                "saisie_journaliere",
+                "bandes",
+                bande_id,
+                f"morts={morts or 0}, aliment={aliment_kg or 0} kg, "
+                f"oeufs={oeufs or 0}",
+                cursor,
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
+
     def get_latest_pesee(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute(

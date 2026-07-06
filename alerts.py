@@ -12,6 +12,7 @@ import indicators
 SEUIL_MORTALITE = 5.0
 SEUIL_IC = 2.2
 JOURS_ECHEANCE = 7
+SEUIL_JOURS_SANS_SAISIE = 2
 
 
 def _today_iso():
@@ -206,9 +207,51 @@ def _alertes_sanitaires(db, date_reference, jours_echeance):
     return alertes
 
 
+def _alertes_saisie_manquante(db, date_reference, jours_sans_saisie):
+    ref = _parse_iso(date_reference)
+    alertes = []
+    for bande in db.get_bandes():
+        statut = bande[5] if len(bande) > 5 and bande[5] else "en_cours"
+        if statut != "en_cours":
+            continue
+        derniere = db.get_derniere_date_saisie(bande[0])
+        point_depart = derniere or bande[2]
+        try:
+            jours = (ref - _parse_iso(point_depart)).days
+        except (TypeError, ValueError):
+            continue
+        if jours < jours_sans_saisie:
+            continue
+        niveau = "critique" if jours >= jours_sans_saisie * 3 else "warning"
+        if derniere:
+            detail = (
+                f"{bande[1]}: aucune saisie depuis {jours} jour(s) "
+                f"(derniere le {derniere})"
+            )
+        else:
+            detail = (
+                f"{bande[1]}: aucune saisie depuis {jours} jour(s) "
+                "(aucune saisie enregistree pour ce lot)"
+            )
+        alertes.append(
+            _alert(
+                niveau,
+                "saisie",
+                "Saisie quotidienne manquante",
+                detail,
+                bande[0],
+                bande[1],
+                jours,
+                jours_sans_saisie,
+            )
+        )
+    return alertes
+
+
 def build_alertes_operationnelles(
     db, date_reference=None, seuil_mortalite=SEUIL_MORTALITE,
-    seuil_ic=SEUIL_IC, jours_echeance=JOURS_ECHEANCE
+    seuil_ic=SEUIL_IC, jours_echeance=JOURS_ECHEANCE,
+    jours_sans_saisie=SEUIL_JOURS_SANS_SAISIE
 ):
     date_reference = date_reference or _today_iso()
     alertes = []
@@ -216,11 +259,22 @@ def build_alertes_operationnelles(
     alertes.extend(_alertes_stock(db))
     alertes.extend(_alertes_sanitaires(db, date_reference, jours_echeance))
     alertes.extend(_alertes_ic(db, seuil_ic))
+    alertes.extend(
+        _alertes_saisie_manquante(db, date_reference, jours_sans_saisie)
+    )
     priority = {"critique": 0, "warning": 1, "info": 2}
+    type_priority = {
+        "mortalite": 0,
+        "sanitaire": 1,
+        "stock": 2,
+        "ic": 3,
+        "saisie": 4,
+    }
     return sorted(
         alertes,
         key=lambda row: (
             priority.get(row["niveau"], 9),
+            type_priority.get(row["type"], 99),
             row["type"],
             row["bande_nom"],
             row["titre"],

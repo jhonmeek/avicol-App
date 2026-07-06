@@ -6,7 +6,11 @@ PyQt6, SQLite et Matplotlib.
 ## Fonctionnalités
 
 - gestion des bandes d'élevage ;
-- suivi des mortalités, dépenses et ventes ;
+- saisie journalière groupée (mortalité, aliment, oeufs) en un seul écran ;
+- suivi des mortalités, dépenses et ventes, avec suppression tracée des
+  erreurs de saisie ;
+- alertes opérationnelles : mortalité, indice de consommation, stock sous
+  seuil, échéances sanitaires, saisie quotidienne manquante ;
 - tableau de bord et indicateurs de performance ;
 - graphiques analytiques et rapports ;
 - exports CSV, sauvegarde et restauration de la base ;
@@ -42,4 +46,3 @@ Artefacts générés :
 - `installer\AvicolePro-Setup-3.1.0.exe` pour l'installation Windows.
 
 Les dossiers `dist`, `build` et `installer` sont volontairement exclus de Git.
-

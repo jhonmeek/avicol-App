@@ -1052,6 +1052,7 @@ class ProfessionalMainWindow(QMainWindow):
         action_layout.setSpacing(10)
         
         buttons = [
+            ("Saisie du jour", self.saisie_du_jour, "success"),
             ("Nouvelle bande", self.nouvelle_bande, "success"),
             ("Déclarer une mortalité", self.ajouter_mortalite, "primary"),
             ("Enregistrer une dépense", self.ajouter_depense, "warning"),
@@ -1543,7 +1544,7 @@ class ProfessionalMainWindow(QMainWindow):
         oeufs_layout.addWidget(ventes_oeufs_label)
 
         self.ventes_oeufs_table = QTableWidget()
-        self.ventes_oeufs_table.setColumnCount(6)
+        self.ventes_oeufs_table.setColumnCount(7)
         self.ventes_oeufs_table.setHorizontalHeaderLabels([
             "Date",
             "Bande",
@@ -1551,6 +1552,7 @@ class ProfessionalMainWindow(QMainWindow):
             "Prix unitaire",
             "Total",
             "Client",
+            "Actions",
         ])
         self.ventes_oeufs_table.setMinimumHeight(190)
         oeufs_layout.addWidget(self.ventes_oeufs_table, 1)
@@ -2576,13 +2578,48 @@ class ProfessionalMainWindow(QMainWindow):
                 "La bande a été mise à jour.",
             )
 
+    def _bouton_suppression(self, entite_label, record_id, supprimer_fn):
+        btn = QPushButton("Supprimer")
+        btn.setStyleSheet(
+            self.theme_manager.get_button_style("secondary", "small")
+        )
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.clicked.connect(
+            lambda _, rid=record_id: self._confirmer_suppression(
+                entite_label, rid, supprimer_fn
+            )
+        )
+        return btn
+
+    def _confirmer_suppression(self, entite_label, record_id, supprimer_fn):
+        reponse = QMessageBox.question(
+            self,
+            "Confirmer la suppression",
+            f"Supprimer définitivement cette saisie ({entite_label}) ?\n"
+            "L'opération sera tracée dans le journal.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reponse != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            supprimer_fn(record_id)
+        except ValueError as exc:
+            self.show_message(
+                QMessageBox.Icon.Warning, "Suppression refusée", str(exc)
+            )
+            return
+        self.update_dashboard()
+        self.load_bandes()
+        self.load_transactions()
+
     def load_transactions(self):
-        """Charger les trois journaux de transactions."""
+        """Charger les journaux de transactions."""
         cursor = self.db.conn.cursor()
         if hasattr(self, "mortalites_table"):
             rows = cursor.execute(
                 """
-                SELECT m.date, b.nom_bande, m.nombre_morts, m.cause,
+                SELECT m.id, m.date, b.nom_bande, m.nombre_morts, m.cause,
                        m.description
                 FROM mortalites m
                 LEFT JOIN bandes b ON b.id = m.bande_id
@@ -2592,11 +2629,11 @@ class ProfessionalMainWindow(QMainWindow):
             self.mortalites_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
-                    row[1] or "",
-                    row[2],
-                    row[3] or "",
+                    row[1],
+                    row[2] or "",
+                    row[3],
                     row[4] or "",
+                    row[5] or "",
                     "",
                     "",
                 ]
@@ -2604,11 +2641,18 @@ class ProfessionalMainWindow(QMainWindow):
                     self.mortalites_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.mortalites_table.setCellWidget(
+                    row_index,
+                    self.mortalites_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "mortalité", row[0], self.db.supprimer_mortalite
+                    ),
+                )
 
         if hasattr(self, "depenses_table"):
             rows = cursor.execute(
                 """
-                SELECT d.date, d.type_depense, d.description, d.montant,
+                SELECT d.id, d.date, d.type_depense, d.description, d.montant,
                        b.nom_bande, d.fournisseur
                 FROM depenses d
                 LEFT JOIN bandes b ON b.id = d.bande_id
@@ -2618,24 +2662,31 @@ class ProfessionalMainWindow(QMainWindow):
             self.depenses_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
                     row[1],
-                    row[2] or "",
-                    f"{row[3]:,.0f} FCFA",
-                    row[4] or "",
+                    row[2],
+                    row[3] or "",
+                    f"{row[4]:,.0f} FCFA",
                     row[5] or "",
+                    row[6] or "",
                     "",
                 ]
                 for column, value in enumerate(values):
                     self.depenses_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.depenses_table.setCellWidget(
+                    row_index,
+                    self.depenses_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "dépense", row[0], self.db.supprimer_depense
+                    ),
+                )
 
         if hasattr(self, "ventes_table"):
             rows = cursor.execute(
                 """
-                SELECT v.date, b.nom_bande, v.nombre_poulets, v.prix_unitaire,
-                       v.montant_total, v.client, v.paiement
+                SELECT v.id, v.date, b.nom_bande, v.nombre_poulets,
+                       v.prix_unitaire, v.montant_total, v.client, v.paiement
                 FROM ventes v
                 LEFT JOIN bandes b ON b.id = v.bande_id
                 ORDER BY v.date DESC, v.id DESC
@@ -2644,24 +2695,31 @@ class ProfessionalMainWindow(QMainWindow):
             self.ventes_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
-                    row[1] or "",
-                    row[2],
-                    f"{row[3]:,.0f} FCFA",
+                    row[1],
+                    row[2] or "",
+                    row[3],
                     f"{row[4]:,.0f} FCFA",
-                    row[5] or "",
+                    f"{row[5]:,.0f} FCFA",
                     row[6] or "",
+                    row[7] or "",
                     "",
                 ]
                 for column, value in enumerate(values):
                     self.ventes_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.ventes_table.setCellWidget(
+                    row_index,
+                    self.ventes_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "vente", row[0], self.db.supprimer_vente
+                    ),
+                )
 
         if hasattr(self, "aliment_table"):
             rows = cursor.execute(
                 """
-                SELECT a.date, b.nom_bande, a.quantite_kg, a.type_aliment,
+                SELECT a.id, a.date, b.nom_bande, a.quantite_kg, a.type_aliment,
                        a.observation
                 FROM consommations_aliment a
                 LEFT JOIN bandes b ON b.id = a.bande_id
@@ -2671,11 +2729,11 @@ class ProfessionalMainWindow(QMainWindow):
             self.aliment_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
-                    row[1] or "",
-                    f"{row[2]:,.2f} kg",
-                    row[3] or "",
+                    row[1],
+                    row[2] or "",
+                    f"{row[3]:,.2f} kg",
                     row[4] or "",
+                    row[5] or "",
                     "IC",
                     "",
                 ]
@@ -2683,11 +2741,20 @@ class ProfessionalMainWindow(QMainWindow):
                     self.aliment_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.aliment_table.setCellWidget(
+                    row_index,
+                    self.aliment_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "consommation d'aliment",
+                        row[0],
+                        self.db.supprimer_consommation_aliment,
+                    ),
+                )
 
         if hasattr(self, "pesees_table"):
             rows = cursor.execute(
                 """
-                SELECT p.date, b.nom_bande, p.poids_moyen_g, p.effectif_pese,
+                SELECT p.id, p.date, b.nom_bande, p.poids_moyen_g, p.effectif_pese,
                        p.observation
                 FROM pesees p
                 LEFT JOIN bandes b ON b.id = p.bande_id
@@ -2697,11 +2764,11 @@ class ProfessionalMainWindow(QMainWindow):
             self.pesees_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
-                    row[1] or "",
-                    f"{row[2]:,.0f} g",
-                    row[3],
-                    row[4] or "",
+                    row[1],
+                    row[2] or "",
+                    f"{row[3]:,.0f} g",
+                    row[4],
+                    row[5] or "",
                     "GMQ",
                     "",
                 ]
@@ -2709,11 +2776,19 @@ class ProfessionalMainWindow(QMainWindow):
                     self.pesees_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.pesees_table.setCellWidget(
+                    row_index,
+                    self.pesees_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "pesée", row[0], self.db.supprimer_pesee
+                    ),
+                )
 
         if hasattr(self, "ponte_table"):
             rows = cursor.execute(
                 """
-                SELECT p.date, b.nom_bande, p.nombre_oeufs, p.observation, p.bande_id
+                SELECT p.id, p.date, b.nom_bande, p.nombre_oeufs,
+                       p.observation, p.bande_id
                 FROM pontes p
                 LEFT JOIN bandes b ON b.id = p.bande_id
                 ORDER BY p.date DESC, p.id DESC
@@ -2721,25 +2796,32 @@ class ProfessionalMainWindow(QMainWindow):
             ).fetchall()
             self.ponte_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
-                poules_presentes = self.db.get_poulets_restants(row[4]) or 0
-                taux_jour = indicators.taux_ponte(row[2], poules_presentes)
+                poules_presentes = self.db.get_poulets_restants(row[5]) or 0
+                taux_jour = indicators.taux_ponte(row[3], poules_presentes)
                 values = [
-                    row[0],
-                    row[1] or "",
-                    row[2],
+                    row[1],
+                    row[2] or "",
+                    row[3],
                     f"{taux_jour:.1f} %" if poules_presentes else "N/A",
-                    row[3] or "",
+                    row[4] or "",
                     "",
                 ]
                 for column, value in enumerate(values):
                     self.ponte_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.ponte_table.setCellWidget(
+                    row_index,
+                    self.ponte_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "ponte", row[0], self.db.supprimer_ponte
+                    ),
+                )
 
         if hasattr(self, "ventes_oeufs_table"):
             rows = cursor.execute(
                 """
-                SELECT m.date, b.nom_bande, m.quantite, m.prix_unitaire,
+                SELECT m.id, m.date, b.nom_bande, m.quantite, m.prix_unitaire,
                        m.montant, m.client
                 FROM mouvements_oeufs m
                 LEFT JOIN bandes b ON b.id = m.bande_id
@@ -2750,17 +2832,27 @@ class ProfessionalMainWindow(QMainWindow):
             self.ventes_oeufs_table.setRowCount(len(rows))
             for row_index, row in enumerate(rows):
                 values = [
-                    row[0],
-                    row[1] or "",
-                    row[2],
-                    f"{row[3]:,.0f} FCFA",
+                    row[1],
+                    row[2] or "",
+                    row[3],
                     f"{row[4]:,.0f} FCFA",
-                    row[5] or "",
+                    f"{row[5]:,.0f} FCFA",
+                    row[6] or "",
+                    "",
                 ]
                 for column, value in enumerate(values):
                     self.ventes_oeufs_table.setItem(
                         row_index, column, QTableWidgetItem(str(value))
                     )
+                self.ventes_oeufs_table.setCellWidget(
+                    row_index,
+                    self.ventes_oeufs_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "vente d'oeufs",
+                        row[0],
+                        self.db.supprimer_vente_oeufs,
+                    ),
+                )
 
         if hasattr(self, "calibrage_oeufs_table"):
             rows = cursor.execute(
@@ -2913,6 +3005,8 @@ class ProfessionalMainWindow(QMainWindow):
             (self.ventes_table, 1),
             (self.aliment_table, 1),
             (self.pesees_table, 1),
+            (self.ponte_table, 1),
+            (self.ventes_oeufs_table, 1),
             (self.calibrage_oeufs_table, 1),
             (self.interventions_table, 1),
             (self.journal_table, None),
@@ -3440,6 +3534,39 @@ class ProfessionalMainWindow(QMainWindow):
                 QMessageBox.Icon.Information,
                 "Bande créée",
                 "La nouvelle bande a été enregistrée.",
+            )
+
+    def saisie_du_jour(self):
+        from dialogs import SaisieJournaliereDialog
+
+        bandes_actives = [
+            bande for bande in self.db.get_bandes()
+            if (bande[5] or "en_cours") == "en_cours"
+        ]
+        if not bandes_actives:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Aucune bande active",
+                "Créez d'abord une bande pour saisir la journée.",
+            )
+            return
+        dialog = SaisieJournaliereDialog(bandes_actives, self.db, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.enregistrer_saisie_journaliere(**data)
+            except ValueError as exc:
+                self.show_message(
+                    QMessageBox.Icon.Warning, "Saisie refusée", str(exc)
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.load_transactions()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Saisie enregistrée",
+                "La saisie du jour a été prise en compte.",
             )
     
     def ajouter_mortalite(self):
