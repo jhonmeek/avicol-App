@@ -103,8 +103,8 @@ def _alertes_mortalite(db, seuil_mortalite):
                 _alert(
                     niveau,
                     "mortalite",
-                    "Mortalite elevee",
-                    f"{nom}: {taux:.1f}% de mortalite ({morts} sujets)",
+                    "Mortalité élevée",
+                    f"{nom}: {taux:.1f}% de mortalité ({morts} sujets)",
                     bande_id,
                     nom,
                     taux,
@@ -132,7 +132,7 @@ def _alertes_ic(db, seuil_ic):
                 _alert(
                     niveau,
                     "ic",
-                    "Indice de consommation eleve",
+                    "Indice de consommation élevé",
                     detail,
                     bande_id,
                     nom,
@@ -195,7 +195,7 @@ def _alertes_sanitaires(db, date_reference, jours_echeance):
             _alert(
                 niveau,
                 "sanitaire",
-                "Echeance sanitaire",
+                "Échéance sanitaire",
                 f"{bande_nom}: {row[4]} {detail_suffix}",
                 row[1],
                 bande_nom,
@@ -226,12 +226,12 @@ def _alertes_saisie_manquante(db, date_reference, jours_sans_saisie):
         if derniere:
             detail = (
                 f"{bande[1]}: aucune saisie depuis {jours} jour(s) "
-                f"(derniere le {derniere})"
+                f"(dernière le {derniere})"
             )
         else:
             detail = (
                 f"{bande[1]}: aucune saisie depuis {jours} jour(s) "
-                "(aucune saisie enregistree pour ce lot)"
+                "(aucune saisie enregistrée pour ce lot)"
             )
         alertes.append(
             _alert(
@@ -301,13 +301,13 @@ def alertes_csv_rows(alertes):
 def alertes_text(alertes):
     lines = [
         "AVICOLE PRO",
-        "ALERTES OPERATIONNELLES",
-        f"Edite le {datetime.now():%d/%m/%Y a %H:%M}",
+        "ALERTES OPÉRATIONNELLES",
+        f"Édité le {datetime.now():%d/%m/%Y à %H:%M}",
         "=" * 58,
         "",
     ]
     if not alertes:
-        lines.append("Aucune alerte operationnelle.")
+        lines.append("Aucune alerte opérationnelle.")
         return "\n".join(lines)
 
     for alerte in alertes:
@@ -316,7 +316,7 @@ def alertes_text(alertes):
             f"[{alerte['niveau'].upper()}] {alerte['titre']}{lot}"
         )
         lines.append(f"  Type : {alerte['type']}")
-        lines.append(f"  Detail : {alerte['detail']}")
+        lines.append(f"  Détail : {alerte['detail']}")
         if alerte["valeur"] is not None or alerte["seuil"] is not None:
             lines.append(
                 "  Valeur / seuil : "
