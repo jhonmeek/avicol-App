@@ -17,9 +17,10 @@ from .styles import configure_dialog, prepare_form, show_validation
 
 
 class SaisieAlimentDialog(QDialog):
-    def __init__(self, bande_id, parent=None):
+    def __init__(self, bande_id, articles_aliment=None, parent=None):
         super().__init__(parent)
         self.bande_id = bande_id
+        self.articles_aliment = articles_aliment or []
         self.setWindowTitle("Saisie aliment")
         configure_dialog(self, 560, 480)
         self.setup_ui()
@@ -56,6 +57,12 @@ class SaisieAlimentDialog(QDialog):
             "Autre aliment",
         ])
         form.addRow("Type d'aliment", self.type_combo)
+
+        self.stock_combo = QComboBox()
+        self.stock_combo.addItem("Ne pas déduire du stock", None)
+        for article_id, nom_article, _categorie, unite, _seuil in self.articles_aliment:
+            self.stock_combo.addItem(f"{nom_article} ({unite})", article_id)
+        form.addRow("Source stock", self.stock_combo)
 
         self.observation_input = QTextEdit()
         self.observation_input.setPlaceholderText("Observation optionnelle")
@@ -99,5 +106,6 @@ class SaisieAlimentDialog(QDialog):
             "date": self.date_input.date().toString("yyyy-MM-dd"),
             "quantite_kg": self.quantite_input.value(),
             "type_aliment": self.type_combo.currentText(),
+            "stock_id": self.stock_combo.currentData(),
             "observation": self.observation_input.toPlainText().strip(),
         }

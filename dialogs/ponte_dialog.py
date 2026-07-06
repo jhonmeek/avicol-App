@@ -85,8 +85,8 @@ class SaisiePonteDialog(QDialog):
             )
 
     def validate_and_accept(self):
-        if self.nombre_oeufs_input.value() <= 0:
-            show_validation(self, "Le nombre d'œufs doit être supérieur à zéro.")
+        if self.nombre_oeufs_input.value() < 0:
+            show_validation(self, "Le nombre d'œufs ne peut pas être négatif.")
             self.nombre_oeufs_input.setFocus()
             return
         self.accept()

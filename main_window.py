@@ -1055,6 +1055,7 @@ class ProfessionalMainWindow(QMainWindow):
             ("Saisie du jour", self.saisie_du_jour, "success"),
             ("Nouvelle bande", self.nouvelle_bande, "success"),
             ("Déclarer une mortalité", self.ajouter_mortalite, "primary"),
+            ("Sortie effectif", self.ajouter_sortie_effectif, "secondary"),
             ("Enregistrer une dépense", self.ajouter_depense, "warning"),
             ("Enregistrer une vente", self.ajouter_vente, "info"),
             ("Saisir aliment", self.ajouter_aliment, "secondary"),
@@ -1394,6 +1395,36 @@ class ProfessionalMainWindow(QMainWindow):
             "Actions",
         ])
         mortalites_layout.addWidget(self.mortalites_table, 1)
+
+        # Onglet Sorties d'effectif
+        sorties_effectif_tab = QWidget()
+        sorties_effectif_layout = QVBoxLayout(sorties_effectif_tab)
+        sorties_effectif_layout.setContentsMargins(10, 10, 10, 10)
+
+        sorties_effectif_header = QHBoxLayout()
+        sorties_effectif_header.addWidget(QLabel("Sorties d'effectif"))
+        sorties_effectif_header.addStretch()
+
+        add_sortie_effectif_btn = QPushButton("Ajouter")
+        add_sortie_effectif_btn.setStyleSheet(
+            self.theme_manager.get_button_style("primary", "small")
+        )
+        add_sortie_effectif_btn.clicked.connect(self.ajouter_sortie_effectif)
+        sorties_effectif_header.addWidget(add_sortie_effectif_btn)
+
+        sorties_effectif_layout.addLayout(sorties_effectif_header)
+
+        self.sorties_effectif_table = QTableWidget()
+        self.sorties_effectif_table.setColumnCount(6)
+        self.sorties_effectif_table.setHorizontalHeaderLabels([
+            "Date",
+            "Bande",
+            "Nombre",
+            "Motif",
+            "Observation",
+            "Actions",
+        ])
+        sorties_effectif_layout.addWidget(self.sorties_effectif_table, 1)
         
         # Onglet Dépenses
         depenses_tab = QWidget()
@@ -1666,6 +1697,7 @@ class ProfessionalMainWindow(QMainWindow):
         journal_layout.addWidget(self.journal_table, 1)
 
         self.trans_tabs.addTab(mortalites_tab, "Mortalités")
+        self.trans_tabs.addTab(sorties_effectif_tab, "Sorties effectif")
         self.trans_tabs.addTab(depenses_tab, "Dépenses")
         self.trans_tabs.addTab(ventes_tab, "Ventes")
         self.trans_tabs.addTab(aliment_tab, "Aliment")
@@ -2466,6 +2498,12 @@ class ProfessionalMainWindow(QMainWindow):
                 FROM mortalites 
                 WHERE bande_id = ?
                 UNION ALL
+                SELECT 'EFF' as icon, date, 'Sortie effectif' as type,
+                       nombre || ' sujets' as description,
+                       NULL as montant, COALESCE(motif, '') as info
+                FROM sorties_effectif
+                WHERE bande_id = ?
+                UNION ALL
                 SELECT 'DEP' as icon, date, 'Dépense' as type, 
                        type_depense as description,
                        montant, COALESCE(description, '') as info
@@ -2499,6 +2537,7 @@ class ProfessionalMainWindow(QMainWindow):
                 ORDER BY date DESC
                 LIMIT 10
             ''', (
+                self.current_bande_id,
                 self.current_bande_id,
                 self.current_bande_id,
                 self.current_bande_id,
@@ -2646,6 +2685,40 @@ class ProfessionalMainWindow(QMainWindow):
                     self.mortalites_table.columnCount() - 1,
                     self._bouton_suppression(
                         "mortalité", row[0], self.db.supprimer_mortalite
+                    ),
+                )
+
+        if hasattr(self, "sorties_effectif_table"):
+            rows = cursor.execute(
+                """
+                SELECT s.id, s.date, b.nom_bande, s.nombre, s.motif,
+                       s.description
+                FROM sorties_effectif s
+                LEFT JOIN bandes b ON b.id = s.bande_id
+                ORDER BY s.date DESC, s.id DESC
+                """
+            ).fetchall()
+            self.sorties_effectif_table.setRowCount(len(rows))
+            for row_index, row in enumerate(rows):
+                values = [
+                    row[1],
+                    row[2] or "",
+                    row[3],
+                    row[4] or "",
+                    row[5] or "",
+                    "",
+                ]
+                for column, value in enumerate(values):
+                    self.sorties_effectif_table.setItem(
+                        row_index, column, QTableWidgetItem(str(value))
+                    )
+                self.sorties_effectif_table.setCellWidget(
+                    row_index,
+                    self.sorties_effectif_table.columnCount() - 1,
+                    self._bouton_suppression(
+                        "sortie d'effectif",
+                        row[0],
+                        self.db.supprimer_sortie_effectif,
                     ),
                 )
 
@@ -3001,6 +3074,7 @@ class ProfessionalMainWindow(QMainWindow):
 
         tables = (
             (self.mortalites_table, 1),
+            (self.sorties_effectif_table, 1),
             (self.depenses_table, 4),
             (self.ventes_table, 1),
             (self.aliment_table, 1),
@@ -3605,6 +3679,53 @@ class ProfessionalMainWindow(QMainWindow):
                 "Déclaration enregistrée",
                 "La mortalité a été prise en compte.",
             )
+
+    def ajouter_sortie_effectif(self):
+        if not self.current_bande_id:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Bande requise",
+                "Sélectionnez d'abord une bande active.",
+            )
+            return
+
+        disponibles = self.db.get_poulets_restants(self.current_bande_id)
+        if disponibles <= 0:
+            self.show_message(
+                QMessageBox.Icon.Warning,
+                "Sortie impossible",
+                "Aucun sujet n'est disponible pour cette bande.",
+            )
+            return
+
+        from dialogs import SortieEffectifDialog
+
+        dialog = SortieEffectifDialog(self.current_bande_id, disponibles, self)
+        if dialog.exec():
+            data = dialog.get_data()
+            try:
+                self.db.ajouter_sortie_effectif(
+                    self.current_bande_id,
+                    data["date"],
+                    data["nombre"],
+                    data["motif"],
+                    data["description"],
+                )
+            except ValueError as erreur:
+                self.show_message(
+                    QMessageBox.Icon.Warning,
+                    "Sortie refusée",
+                    str(erreur),
+                )
+                return
+            self.update_dashboard()
+            self.load_bandes()
+            self.load_transactions()
+            self.show_message(
+                QMessageBox.Icon.Information,
+                "Sortie enregistrée",
+                "La sortie d'effectif a été prise en compte.",
+            )
     
     def ajouter_depense(self):
         if not self.current_bande_id:
@@ -3647,16 +3768,21 @@ class ProfessionalMainWindow(QMainWindow):
 
         from dialogs import SaisieAlimentDialog
 
-        dialog = SaisieAlimentDialog(self.current_bande_id, self)
+        articles_aliment = [
+            article for article in self.db.get_articles_stock()
+            if article[2] == "aliment"
+        ]
+        dialog = SaisieAlimentDialog(self.current_bande_id, articles_aliment, self)
         if dialog.exec():
             data = dialog.get_data()
             try:
-                self.db.ajouter_consommation_aliment(
+                self.db.enregistrer_consommation_aliment(
                     self.current_bande_id,
                     data["date"],
                     data["quantite_kg"],
                     data["type_aliment"],
                     data["observation"],
+                    data["stock_id"],
                 )
             except ValueError as erreur:
                 self.show_message(

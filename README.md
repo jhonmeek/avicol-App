@@ -6,9 +6,13 @@ PyQt6, SQLite et Matplotlib.
 ## Fonctionnalités
 
 - gestion des bandes d'élevage ;
-- saisie journalière groupée (mortalité, aliment, oeufs) en un seul écran ;
+- saisie journalière groupée (mortalité, aliment, oeufs, y compris 0 oeuf)
+  en un seul écran ;
 - suivi des mortalités, dépenses et ventes, avec suppression tracée des
   erreurs de saisie ;
+- sorties d'effectif hors mortalité/vente (réforme, don, transfert,
+  ajustement) ;
+- consommation d'aliment directe ou déduite du stock depuis le même flux ;
 - alertes opérationnelles : mortalité, indice de consommation, stock sous
   seuil, échéances sanitaires, saisie quotidienne manquante ;
 - tableau de bord et indicateurs de performance ;

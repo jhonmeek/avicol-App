@@ -13,6 +13,7 @@ from .mouvement_stock_dialog import MouvementStockDialog
 from .intervention_dialog import SaisieInterventionDialog
 from .prevision_dialog import PrevisionLotDialog
 from .saisie_journaliere_dialog import SaisieJournaliereDialog
+from .sortie_effectif_dialog import SortieEffectifDialog
 
 __all__ = [
     'NouvelleBandeDialog',
@@ -29,4 +30,5 @@ __all__ = [
     'SaisieInterventionDialog',
     'PrevisionLotDialog',
     'SaisieJournaliereDialog',
+    'SortieEffectifDialog',
 ]

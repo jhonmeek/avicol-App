@@ -1,5 +1,6 @@
 from PyQt6.QtCore import QDate
 from PyQt6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDateEdit,
     QDialog,
@@ -85,6 +86,9 @@ class SaisieJournaliereDialog(QDialog):
         self.oeufs_input.setSuffix(" oeufs")
         form.addRow("Oeufs ramassés", self.oeufs_input)
 
+        self.oeufs_zero_checkbox = QCheckBox("Enregistrer explicitement 0 oeuf")
+        form.addRow("", self.oeufs_zero_checkbox)
+
         self.observation_input = QLineEdit()
         self.observation_input.setPlaceholderText("Observation facultative")
         form.addRow("Observation", self.observation_input)
@@ -143,6 +147,7 @@ class SaisieJournaliereDialog(QDialog):
             self.morts_input.value() == 0
             and self.aliment_input.value() == 0
             and self.oeufs_input.value() == 0
+            and not self.oeufs_zero_checkbox.isChecked()
         ):
             show_validation(
                 self, "Renseignez au moins une valeur (morts, aliment ou oeufs)."
@@ -153,7 +158,12 @@ class SaisieJournaliereDialog(QDialog):
     def get_data(self):
         morts = self.morts_input.value() or None
         aliment = self.aliment_input.value() or None
-        oeufs = self.oeufs_input.value() or None
+        oeufs = (
+            self.oeufs_input.value()
+            if self.oeufs_input.value() > 0
+            or self.oeufs_zero_checkbox.isChecked()
+            else None
+        )
         observation = self.observation_input.text().strip() or None
         return {
             "bande_id": self.selected_bande_id(),

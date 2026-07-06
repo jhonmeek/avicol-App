@@ -12,7 +12,7 @@ class Database:
         self.conn.execute("PRAGMA journal_mode = WAL")
         self.create_tables()
 
-    SCHEMA_VERSION = 9
+    SCHEMA_VERSION = 10
 
     def create_tables(self):
         """Applique les migrations en attente (idempotent)."""
@@ -60,6 +60,8 @@ class Database:
             self._migration_8_journal_actions()
         elif version == 9:
             self._migration_9_calibrage_oeufs()
+        elif version == 10:
+            self._migration_10_hors_perimetre_v2()
 
     def _migration_1_baseline(self):
         cursor = self.conn.cursor()
@@ -334,6 +336,48 @@ class Database:
             "ON calibrages_oeufs (bande_id, date)"
         )
 
+    def _migration_10_hors_perimetre_v2(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='pontes'"
+        )
+        row = cursor.fetchone()
+        if row and "nombre_oeufs > 0" in (row[0] or ""):
+            cursor.execute("ALTER TABLE pontes RENAME TO pontes_v9")
+            cursor.execute('''
+                CREATE TABLE pontes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    bande_id INTEGER NOT NULL,
+                    date DATE NOT NULL,
+                    nombre_oeufs INTEGER NOT NULL CHECK (nombre_oeufs >= 0),
+                    observation TEXT,
+                    FOREIGN KEY (bande_id) REFERENCES bandes(id)
+                )
+            ''')
+            cursor.execute('''
+                INSERT INTO pontes (id, bande_id, date, nombre_oeufs, observation)
+                SELECT id, bande_id, date, nombre_oeufs, observation
+                FROM pontes_v9
+            ''')
+            cursor.execute("DROP TABLE pontes_v9")
+            self._create_ponte_indexes()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sorties_effectif (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                bande_id INTEGER NOT NULL,
+                date DATE NOT NULL,
+                nombre INTEGER NOT NULL CHECK (nombre > 0),
+                motif TEXT,
+                description TEXT,
+                FOREIGN KEY (bande_id) REFERENCES bandes(id)
+            )
+        ''')
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_sorties_effectif_bande_date "
+            "ON sorties_effectif (bande_id, date)"
+        )
+
     def _ensure_column(self, table, column, definition):
         cursor = self.conn.cursor()
         columns = {
@@ -528,23 +572,71 @@ class Database:
     def ajouter_consommation_aliment(
         self, bande_id, date, quantite_kg, type_aliment=None, observation=None
     ):
+        self.enregistrer_consommation_aliment(
+            bande_id, date, quantite_kg, type_aliment, observation
+        )
+
+    def enregistrer_consommation_aliment(
+        self, bande_id, date, quantite_kg, type_aliment=None, observation=None,
+        stock_id=None
+    ):
         if quantite_kg <= 0:
             raise ValueError("La quantite d'aliment doit etre superieure a zero.")
+        stock_info = None
+        if stock_id is not None:
+            stock_info = self._get_article_stock_info(stock_id)
+            if stock_info is None:
+                raise ValueError(f"Article de stock introuvable (id={stock_id}).")
+            if stock_info[2] != 'aliment':
+                raise ValueError("Seuls les articles de stock aliment peuvent etre lies.")
+            stock_actuel = self.get_stock_quantite(stock_id)
+            if quantite_kg > stock_actuel:
+                raise ValueError(
+                    f"Sortie refusee : {quantite_kg:g} kg demandes pour "
+                    f"{stock_actuel:g} kg en stock."
+                )
         cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO consommations_aliment (
-                bande_id, date, quantite_kg, type_aliment, observation
-            )
-            VALUES (?, ?, ?, ?, ?)
-        ''', (bande_id, date, quantite_kg, type_aliment, observation))
-        self._log_action(
-            'consommation_aliment',
-            'consommations_aliment',
-            cursor.lastrowid,
-            f"{quantite_kg:g} kg - {type_aliment or 'type non renseigne'}",
-            cursor,
-        )
-        self.conn.commit()
+        try:
+            mouvement_id = None
+            if stock_id is not None:
+                motif = (
+                    f"Consommation aliment - {observation}"
+                    if observation else "Consommation aliment"
+                )
+                cursor.execute('''
+                    INSERT INTO mouvements_stock (
+                        stock_id, date, type_mouvement, quantite, bande_id, motif
+                    )
+                    VALUES (?, ?, 'sortie', ?, ?, ?)
+                ''', (stock_id, date, quantite_kg, bande_id, motif))
+                mouvement_id = cursor.lastrowid
+            cursor.execute('''
+                INSERT INTO consommations_aliment (
+                    bande_id, date, quantite_kg, type_aliment, observation
+                )
+                VALUES (?, ?, ?, ?, ?)
+            ''', (bande_id, date, quantite_kg, type_aliment, observation))
+            consommation_id = cursor.lastrowid
+            if stock_id is not None:
+                self._log_action(
+                    'sortie_stock_aliment',
+                    'mouvements_stock',
+                    mouvement_id,
+                    f"{quantite_kg:g} kg - stock #{stock_id}",
+                    cursor,
+                )
+            else:
+                self._log_action(
+                    'consommation_aliment',
+                    'consommations_aliment',
+                    consommation_id,
+                    f"{quantite_kg:g} kg - {type_aliment or 'type non renseigne'}",
+                    cursor,
+                )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def ajouter_pesee(
         self, bande_id, date, poids_moyen_g, effectif_pese, observation=None
@@ -570,26 +662,33 @@ class Database:
         self.conn.commit()
 
     def ajouter_ponte(self, bande_id, date, nombre_oeufs, observation=None):
-        if nombre_oeufs <= 0:
-            raise ValueError("Le nombre d'oeufs doit etre superieur a zero.")
+        if nombre_oeufs < 0:
+            raise ValueError("Le nombre d'oeufs ne peut pas etre negatif.")
         cursor = self.conn.cursor()
-        cursor.execute('''
-            INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
-            VALUES (?, ?, ?, ?)
-        ''', (bande_id, date, nombre_oeufs, observation))
-        ponte_id = cursor.lastrowid
-        cursor.execute('''
-            INSERT INTO mouvements_oeufs (bande_id, date, type_mouvement, quantite)
-            VALUES (?, ?, 'entree_production', ?)
-        ''', (bande_id, date, nombre_oeufs))
-        self._log_action(
-            'ponte',
-            'pontes',
-            ponte_id,
-            f"{nombre_oeufs} oeufs produits",
-            cursor,
-        )
-        self.conn.commit()
+        try:
+            cursor.execute('''
+                INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
+                VALUES (?, ?, ?, ?)
+            ''', (bande_id, date, nombre_oeufs, observation))
+            ponte_id = cursor.lastrowid
+            if nombre_oeufs > 0:
+                cursor.execute('''
+                    INSERT INTO mouvements_oeufs (
+                        bande_id, date, type_mouvement, quantite
+                    )
+                    VALUES (?, ?, 'entree_production', ?)
+                ''', (bande_id, date, nombre_oeufs))
+            self._log_action(
+                'ponte',
+                'pontes',
+                ponte_id,
+                f"{nombre_oeufs} oeufs produits",
+                cursor,
+            )
+            self.conn.commit()
+        except Exception:
+            self.conn.rollback()
+            raise
 
     def get_total_oeufs(self, bande_id):
         cursor = self.conn.cursor()
@@ -814,6 +913,68 @@ class Database:
         result = cursor.fetchone()[0]
         return result if result else 0
 
+    def ajouter_sortie_effectif(
+        self, bande_id, date, nombre, motif=None, description=None
+    ):
+        if nombre <= 0:
+            raise ValueError("La sortie d'effectif doit etre superieure a zero.")
+        restants = self.get_poulets_restants(bande_id)
+        if nombre > restants:
+            raise ValueError(
+                f"Sortie refusee : {nombre} sujets demandes pour "
+                f"{restants} disponibles."
+            )
+        cursor = self.conn.cursor()
+        cursor.execute(
+            '''
+            INSERT INTO sorties_effectif (
+                bande_id, date, nombre, motif, description
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ''',
+            (bande_id, date, nombre, motif, description),
+        )
+        sortie_id = cursor.lastrowid
+        self._log_action(
+            'sortie_effectif',
+            'sorties_effectif',
+            sortie_id,
+            f"{nombre} sujets sortis - {motif or 'motif non renseigne'}",
+            cursor,
+        )
+        self.conn.commit()
+
+    def get_sorties_effectif(self, bande_id=None):
+        cursor = self.conn.cursor()
+        query = '''
+            SELECT id, bande_id, date, nombre, motif, description
+            FROM sorties_effectif
+        '''
+        params = ()
+        if bande_id is not None:
+            query += ' WHERE bande_id = ?'
+            params = (bande_id,)
+        query += ' ORDER BY date DESC, id DESC'
+        cursor.execute(query, params)
+        return cursor.fetchall()
+
+    def get_total_sorties_effectif(self, bande_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT SUM(nombre) FROM sorties_effectif WHERE bande_id = ?',
+            (bande_id,),
+        )
+        result = cursor.fetchone()[0]
+        return result if result else 0
+
+    def supprimer_sortie_effectif(self, sortie_id):
+        self._supprimer_enregistrement(
+            "sorties_effectif",
+            sortie_id,
+            "suppression_sortie_effectif",
+            "Sortie d'effectif",
+        )
+
     def get_total_depenses(self, bande_id):
         cursor = self.conn.cursor()
         cursor.execute('SELECT SUM(montant) FROM depenses WHERE bande_id = ?', (bande_id,))
@@ -846,7 +1007,8 @@ class Database:
         initial = row[0]
         total_morts = self.get_total_mortalites(bande_id)
         total_vendus = self.get_total_vendus(bande_id)
-        return initial - total_morts - total_vendus
+        total_sorties = self.get_total_sorties_effectif(bande_id)
+        return initial - total_morts - total_vendus - total_sorties
 
     def get_total_vendus(self, bande_id):
         cursor = self.conn.cursor()
@@ -1059,7 +1221,7 @@ class Database:
         aliment_kg=None, type_aliment=None, oeufs=None, observation=None
     ):
         """Enregistre mortalite, aliment et oeufs en une transaction."""
-        if not any((morts, aliment_kg, oeufs)):
+        if not any((morts, aliment_kg)) and oeufs is None:
             raise ValueError(
                 "Renseignez au moins une valeur (morts, aliment ou oeufs)."
             )
@@ -1073,8 +1235,8 @@ class Database:
             raise ValueError(
                 "La quantite d'aliment doit etre superieure a zero."
             )
-        if oeufs is not None and oeufs <= 0:
-            raise ValueError("Le nombre d'oeufs doit etre superieur a zero.")
+        if oeufs is not None and oeufs < 0:
+            raise ValueError("Le nombre d'oeufs ne peut pas etre negatif.")
 
         cursor = self.conn.cursor()
         try:
@@ -1098,7 +1260,7 @@ class Database:
                     ''',
                     (bande_id, date, aliment_kg, type_aliment, observation),
                 )
-            if oeufs:
+            if oeufs is not None:
                 cursor.execute(
                     '''
                     INSERT INTO pontes (bande_id, date, nombre_oeufs, observation)
@@ -1106,15 +1268,16 @@ class Database:
                     ''',
                     (bande_id, date, oeufs, observation),
                 )
-                cursor.execute(
-                    '''
-                    INSERT INTO mouvements_oeufs (
-                        bande_id, date, type_mouvement, quantite
+                if oeufs > 0:
+                    cursor.execute(
+                        '''
+                        INSERT INTO mouvements_oeufs (
+                            bande_id, date, type_mouvement, quantite
+                        )
+                        VALUES (?, ?, 'entree_production', ?)
+                        ''',
+                        (bande_id, date, oeufs),
                     )
-                    VALUES (?, ?, 'entree_production', ?)
-                    ''',
-                    (bande_id, date, oeufs),
-                )
             self._log_action(
                 "saisie_journaliere",
                 "bandes",
@@ -1281,6 +1444,15 @@ class Database:
         )
         return cursor.fetchall()
 
+    def _get_article_stock_info(self, stock_id):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            'SELECT id, nom_article, categorie, unite, seuil_alerte '
+            'FROM stocks WHERE id = ?',
+            (stock_id,),
+        )
+        return cursor.fetchone()
+
     def get_stock_quantite(self, stock_id):
         cursor = self.conn.cursor()
         cursor.execute(
@@ -1373,40 +1545,14 @@ class Database:
         """EF-6.4 : une sortie de stock d'aliment credite aussi
         consommations_aliment, pour eviter la double saisie entre le module
         Stocks et le suivi zootechnique (IC, Phase 2)."""
-        if quantite_kg <= 0:
-            raise ValueError("La quantité d'aliment doit être supérieure à zéro.")
-        stock_actuel = self.get_stock_quantite(stock_id)
-        if quantite_kg > stock_actuel:
-            raise ValueError(
-                f"Sortie refusée : {quantite_kg:g} kg demandés pour "
-                f"{stock_actuel:g} kg en stock."
-            )
-        cursor = self.conn.cursor()
-        motif = (
-            f"Consommation aliment - {observation}"
-            if observation else "Consommation aliment"
+        self.enregistrer_consommation_aliment(
+            bande_id,
+            date,
+            quantite_kg,
+            type_aliment,
+            observation,
+            stock_id,
         )
-        cursor.execute('''
-            INSERT INTO mouvements_stock (
-                stock_id, date, type_mouvement, quantite, bande_id, motif
-            )
-            VALUES (?, ?, 'sortie', ?, ?, ?)
-        ''', (stock_id, date, quantite_kg, bande_id, motif))
-        mouvement_id = cursor.lastrowid
-        cursor.execute('''
-            INSERT INTO consommations_aliment (
-                bande_id, date, quantite_kg, type_aliment, observation
-            )
-            VALUES (?, ?, ?, ?, ?)
-        ''', (bande_id, date, quantite_kg, type_aliment, observation))
-        self._log_action(
-            'sortie_stock_aliment',
-            'mouvements_stock',
-            mouvement_id,
-            f"{quantite_kg:g} kg - stock #{stock_id}",
-            cursor,
-        )
-        self.conn.commit()
 
     def ajouter_intervention_sanitaire(
         self, bande_id, date, type_intervention, produit, dose=None,

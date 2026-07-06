@@ -75,7 +75,7 @@ def test_ajouter_ponte_refuse_valeur_invalide(tmp_path):
     db = Database(db_name=tmp_path / "ponte2.db")
     bande_id = _bande_ponte(db)
     with pytest.raises(ValueError):
-        db.ajouter_ponte(bande_id, "2026-03-01", 0)
+        db.ajouter_ponte(bande_id, "2026-03-01", -1)
     db.close()
 
 
